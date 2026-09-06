@@ -953,6 +953,19 @@ function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id
 function changePwd(){var np=document.getElementById("newPwd").value;if(np.length<4){toast("密码至少4位");return}state.parent.password=np;state.updatedAt=Date.now();saveState();document.getElementById("newPwd").value="";toast("密码已修改")}
 
 loadState().then(function(){renderTop();renderTasks()});
+
+// Register Service Worker for PWA
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js')
+      .then(function(registration) {
+        console.log('SW registered: ', registration.scope);
+      })
+      .catch(function(registrationError) {
+        console.log('SW registration failed: ', registrationError);
+      });
+  });
+}
 </script>
 </body>
 </html>
