@@ -124,6 +124,20 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .ai-tag{display:inline-block;background:rgba(168,85,247,.16);color:#C998FF;padding:1px 6px;border-radius:4px;font-size:10px;margin:2px 4px 2px 0;font-weight:600}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1b1f2a;color:var(--text);border:1px solid var(--accent);padding:10px 20px;border-radius:var(--radius-sm);font-size:13px;z-index:200;opacity:0;transition:.3s;pointer-events:none;box-shadow:0 0 24px rgba(255,107,26,.4)}
 .toast.show{opacity:1}
+.timer-wrap{text-align:center;padding:22px 12px 6px}
+.timer-display{font-size:56px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:2px;line-height:1.1;
+  background:linear-gradient(180deg,#FFFFFF,var(--signal));-webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 26px rgba(255,214,10,.22))}
+.timer-display.run{animation:tmTick 1s steps(1) infinite}
+@keyframes tmTick{0%,49%{opacity:1}50%,100%{opacity:.7}}
+.timer-sub{font-size:13px;color:var(--text-2);margin-top:8px}
+.timer-acts{display:flex;gap:10px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+.sess-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:#10131b;transition:.15s}
+.sess-item:hover{border-color:var(--border-2)}
+.sess-time{font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--signal);min-width:66px}
+.sess-main{flex:1;min-width:0}
+.sess-note{font-size:12px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:640px){.timer-display{font-size:42px}.sess-time{min-width:58px;font-size:14px}}
 .img-pick{border:1.5px dashed var(--border-2);border-radius:var(--radius-sm);padding:14px;text-align:center;color:var(--text-3);font-size:13px;cursor:pointer;transition:.15s;background:#10131b}
 .img-pick:hover{border-color:var(--accent);color:var(--accent)}
 .img-prev{max-width:100%;max-height:160px;border-radius:6px;margin-top:8px}
@@ -150,6 +164,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
   <nav class="sidebar" id="sidebar" data-page-node-id="HwqEC5wTk0J85AH5UCtXS0">
     <div class="nav-item active" data-page="tasks" onclick="nav('tasks')" data-page-node-id="lllIR58oWkI0xEuDx0TNlE"><span class="ic" data-page-node-id="I8HCno9SDegoUZTxlJxXCK">📋</span>任务中枢</div>
     <div class="nav-item" data-page="dashboard" onclick="nav('dashboard')" data-page-node-id="DejHhpEDxjAZZIRytN60fa"><span class="ic" data-page-node-id="T3KgRT2l2YyAsm0D4tDPTl">📊</span>学科仪表盘</div>
+    <div class="nav-item" data-page="study" onclick="nav('study')"><span class="ic">⏱️</span>学时记录</div>
     <div class="nav-item" data-page="wrong" onclick="nav('wrong')" data-page-node-id="bcB4PEyNXZ6DV5mxaOeC14"><span class="ic" data-page-node-id="AmCw78hhP5nXd1xtZQ7QwA">📝</span>错题难题库</div>
     <div class="nav-item" data-page="review" onclick="nav('review')" data-page-node-id="dKT85RSEbHnJJqrzzrEmeL"><span class="ic" data-page-node-id="wbsXtScKXFFHi2hTLhJAuZ">📈</span>复盘引擎</div>
     <div class="nav-item" data-page="graph" onclick="nav('graph')" data-page-node-id="qB3BCiDWvlLanndpucX4JZ"><span class="ic" data-page-node-id="7PYK2ReMUXiLTEYwDFssiM">🕸️</span>知识图谱</div>
@@ -209,6 +224,75 @@ input,select,textarea{font-family:inherit;font-size:14px}
         <div class="metric" data-page-node-id="vh6aga2bXVB164oGt3u5TV"><div class="v" id="wqThisWeek" data-page-node-id="oYXWQIqdZQt3IsOofgFvr2">0</div><div class="l" data-page-node-id="vMFlRJAHzqhmfXEe9GpsCU">本周新增</div></div>
       </div>
       <div id="wrongList" data-page-node-id="nkcxF25HzlrWqTwwznjQKQ"></div>
+    </section>
+
+    <section class="page" id="page-study">
+      <h1 class="page-title">学时记录</h1>
+      <p class="page-sub">专注计时器 + 自动统计，把每天真实投入的学习时间变成看得见的数据</p>
+
+      <div class="card">
+        <div class="card-h">专注计时 <span id="timerState" style="font-size:12px;color:var(--text-3);font-weight:400">未开始</span></div>
+        <div class="timer-wrap">
+          <div class="timer-display" id="timerDisplay">00:00:00</div>
+          <div class="timer-sub" id="timerSub">选择科目后点击「开始」，计时会自动保存，刷新页面也不丢</div>
+          <div class="row" style="justify-content:center;margin-top:16px">
+            <select class="select" id="tmSubject" style="max-width:150px">
+              <option value="语文">语文</option><option value="数学">数学</option><option value="英语">英语</option>
+              <option value="物理">物理</option><option value="政治">政治</option><option value="历史">历史</option>
+              <option value="地理">地理</option><option value="生物">生物</option><option value="其他">其他</option>
+            </select>
+          </div>
+          <div class="timer-acts">
+            <button class="btn" id="tmStartBtn" onclick="timerStart()">▶ 开始</button>
+            <button class="btn ghost" id="tmPauseBtn" onclick="timerPause()" disabled>⏸ 暂停</button>
+            <button class="btn warn" id="tmStopBtn" onclick="timerStop()" disabled>⏹ 结束并保存</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g4" style="margin-bottom:16px">
+        <div class="metric"><div class="v" id="stToday">0</div><div class="l">今日(分钟)</div></div>
+        <div class="metric"><div class="v" id="stWeek">0</div><div class="l">本周(分钟)</div></div>
+        <div class="metric"><div class="v" id="stMonth">0</div><div class="l">本月(分钟)</div></div>
+        <div class="metric"><div class="v" id="stAvg">0</div><div class="l">日均(分钟)</div></div>
+      </div>
+
+      <div class="grid g2">
+        <div class="card"><div class="card-h">近 14 天学习时长趋势</div><div id="trendChart"></div></div>
+        <div class="card"><div class="card-h">各科时长分布（近 30 天）</div><div id="subjTimeChart"></div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">手动补录</div>
+        <div class="row">
+          <div style="min-width:120px">
+            <label class="label">科目</label>
+            <select class="select" id="mnSubject">
+              <option value="语文">语文</option><option value="数学">数学</option><option value="英语">英语</option>
+              <option value="物理">物理</option><option value="政治">政治</option><option value="历史">历史</option>
+              <option value="地理">地理</option><option value="生物">生物</option><option value="其他">其他</option>
+            </select>
+          </div>
+          <div style="min-width:110px">
+            <label class="label">时长(分钟)</label>
+            <input class="input" id="mnMinutes" type="number" min="1" max="600" step="5" placeholder="45">
+          </div>
+          <div style="min-width:140px">
+            <label class="label">日期</label>
+            <input class="input" id="mnDate" type="date">
+          </div>
+          <div style="flex:1;min-width:140px">
+            <label class="label">备注(可选)</label>
+            <input class="input" id="mnNote" placeholder="如：复习二次函数">
+          </div>
+          <button class="btn" style="align-self:flex-end" onclick="addManualSession()">+ 添加记录</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">历史记录 <span style="font-size:12px;color:var(--text-3);font-weight:400">最近 30 条</span></div>
+        <div id="sessionList"></div>
+      </div>
     </section>
 
     <section class="page" id="page-review" data-page-node-id="i5ZScML3BvcLDgqoTdvxWY">
@@ -373,6 +457,8 @@ var defaultState=function(){
       {id:"r_outing",name:"周末外出活动",cost:800,icon:"🎢"}
     ],
     weekGoal:600, studyLogs:{},
+    studySessions:[],
+    timer:null,
     parent:{password:"1234",authed:false,freezeThreshold:200},
     settings:{theme:"light",sound:true}
   };
@@ -450,6 +536,8 @@ function mergeStates(local,cloud){
   result.rewards=mergeById(local.rewards,cloud.rewards);
   result.wrongQuestions=mergeById(local.wrongQuestions,cloud.wrongQuestions);
   result.redemptions=mergeById(local.redemptions,cloud.redemptions);
+  result.studySessions=mergeById(local.studySessions,cloud.studySessions);
+  result.timer=pickNewer(local.timer,cloud.timer)||null;
   var unionByKey=function(la,ca,key){
     var seen={};
     return (la||[]).concat(ca||[]).filter(function(x){if(!x)return false;var k=x[key];if(seen[k])return false;seen[k]=1;return true});
@@ -487,6 +575,9 @@ function normalizeState(){
   if(!state.tasks)state.tasks=[];
   if(!state.redemptions)state.redemptions=[];
   if(!state.parent)state.parent=defaultState().parent;
+  if(!state.studySessions)state.studySessions=[];
+  if(!state.studyLogs)state.studyLogs={};
+  if(!state.timer)state.timer=null;
 }
 
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},1800)}
@@ -501,7 +592,7 @@ function nav(page){
   document.querySelectorAll(".nav-item").forEach(function(n){n.classList.remove("active")});
   var navEl=document.querySelector('.nav-item[data-page="'+page+'"]');
   if(navEl)navEl.classList.add("active");
-  var r={tasks:renderTasks,dashboard:renderDashboard,wrong:renderWrong,review:renderReview,graph:renderGraph,mall:renderMall,parent:renderParent}[page];
+  var r={tasks:renderTasks,dashboard:renderDashboard,study:renderStudy,wrong:renderWrong,review:renderReview,graph:renderGraph,mall:renderMall,parent:renderParent}[page];
   if(r)r();
 }
 
@@ -765,6 +856,197 @@ function renderReview(){
   var total=subjData.reduce(function(a,b){return a+b.c},0)||1;
   document.getElementById("subjChart").innerHTML=subjData.map(function(d){var pct=Math.round(d.c/total*100);return '<div class="bar-row"><div class="hd"><span>'+d.s+'</span><span>'+pct+'% ('+d.c+'题)</span></div><div class="progress"><span style="width:'+pct+'%;background:'+SUBJ_COLOR[d.s]+'"></span></div></div>'}).join("");
 }
+/* ============ 学时记录模块 ============ */
+var TIMER_TICK=null;
+
+function fmtDur(ms){
+  var t=Math.max(0,Math.floor(ms/1000));
+  var h=Math.floor(t/3600),m=Math.floor(t%3600/60),s=t%60;
+  return (h<10?"0":"")+h+":"+(m<10?"0":"")+m+":"+(s<10?"0":"")+s;
+}
+function timerElapsed(){
+  var t=state.timer;
+  if(!t)return 0;
+  return (t.accum||0)+(t.running&&t.startAt?(Date.now()-t.startAt):0);
+}
+function timerStart(){
+  var t=state.timer;
+  if(t&&t.running)return;
+  if(!t){
+    state.timer={running:true,subject:document.getElementById("tmSubject").value,startAt:Date.now(),accum:0,date:curDate};
+  }else{
+    t.running=true;t.startAt=Date.now();
+    t.subject=document.getElementById("tmSubject").value;
+  }
+  state.updatedAt=Date.now();saveState();
+  startTimerTick();syncTimerButtons();toast("已开始计时："+state.timer.subject);
+}
+function timerPause(){
+  var t=state.timer;if(!t||!t.running)return;
+  t.accum=timerElapsed();t.running=false;t.startAt=null;
+  state.updatedAt=Date.now();saveState();
+  stopTimerTick();syncTimerButtons();toast("已暂停");
+}
+function timerStop(){
+  var t=state.timer;if(!t)return;
+  var ms=timerElapsed();
+  var minutes=Math.round(ms/60000);
+  if(minutes<1){
+    if(ms<1000){state.timer=null;state.updatedAt=Date.now();saveState();stopTimerTick();syncTimerButtons();return}
+    minutes=1;
+  }
+  addStudySession(t.subject,minutes,t.date||curDate,"计时专注","timer");
+  state.timer=null;
+  state.updatedAt=Date.now();saveState();
+  stopTimerTick();syncTimerButtons();
+  toast("已保存 "+minutes+" 分钟"+(minutes>=25?"，积分 +"+Math.floor(minutes/25)*5:""));
+}
+function startTimerTick(){
+  stopTimerTick();
+  TIMER_TICK=setInterval(function(){
+    if(!state.timer){stopTimerTick();return}
+    document.getElementById("timerDisplay").textContent=fmtDur(timerElapsed());
+  },1000);
+}
+function stopTimerTick(){if(TIMER_TICK){clearInterval(TIMER_TICK);TIMER_TICK=null}}
+function syncTimerButtons(){
+  var t=state.timer;
+  var disp=document.getElementById("timerDisplay");
+  var stEl=document.getElementById("timerState");
+  var subEl=document.getElementById("timerSub");
+  var sBtn=document.getElementById("tmStartBtn"),pBtn=document.getElementById("tmPauseBtn"),eBtn=document.getElementById("tmStopBtn");
+  if(!disp)return;
+  disp.textContent=fmtDur(t?timerElapsed():0);
+  if(t&&t.running){
+    disp.classList.add("run");
+    stEl.textContent="计时中 · "+t.subject;stEl.style.color="var(--green)";
+    subEl.textContent="专注中，离开页面也会继续计时";
+    sBtn.disabled=true;pBtn.disabled=false;eBtn.disabled=false;
+    if(document.getElementById("tmSubject").value!==t.subject)document.getElementById("tmSubject").value=t.subject;
+    document.getElementById("tmSubject").disabled=true;
+  }else if(t){
+    disp.classList.remove("run");
+    stEl.textContent="已暂停 · "+t.subject;stEl.style.color="var(--amber)";
+    subEl.textContent="累计 "+Math.round(timerElapsed()/60000)+" 分钟，可继续或结束保存";
+    sBtn.disabled=false;sBtn.textContent="▶ 继续";pBtn.disabled=true;eBtn.disabled=false;
+    document.getElementById("tmSubject").disabled=false;
+  }else{
+    disp.classList.remove("run");
+    disp.textContent="00:00:00";
+    stEl.textContent="未开始";stEl.style.color="var(--text-3)";
+    subEl.textContent="选择科目后点击「开始」，计时会自动保存，刷新页面也不丢";
+    sBtn.disabled=false;sBtn.textContent="▶ 开始";pBtn.disabled=true;eBtn.disabled=true;
+    document.getElementById("tmSubject").disabled=false;
+  }
+}
+function addStudySession(subject,minutes,date,note,mode){
+  var mins=Math.max(1,Math.round(minutes));
+  var sess={id:uid("ss_"),subject:subject,minutes:mins,date:date,note:note||"",mode:mode||"manual",createdAt:Date.now()};
+  state.studySessions.unshift(sess);
+  if(state.studySessions.length>500)state.studySessions=state.studySessions.slice(0,500);
+  state.studyLogs[date]=(state.studyLogs[date]||0)+mins;
+  var gain=Math.floor(mins/25)*5;
+  if(gain>0)addPoints(gain,"学习时长:"+subject+" "+mins+"分钟");
+  state.updatedAt=Date.now();saveState();
+}
+function addManualSession(){
+  var s=document.getElementById("mnSubject").value;
+  var m=parseInt(document.getElementById("mnMinutes").value);
+  var d=document.getElementById("mnDate").value||curDate;
+  var n=document.getElementById("mnNote").value.trim();
+  if(!m||m<1){toast("请填写时长(分钟)");return}
+  if(m>600){toast("单次不能超过600分钟");return}
+  addStudySession(s,m,d,n,"manual");
+  document.getElementById("mnMinutes").value="";
+  document.getElementById("mnNote").value="";
+  renderStudy();toast("已添加 "+m+" 分钟");
+}
+function delSession(id){
+  var s=state.studySessions.find(function(x){return x.id===id});
+  if(!s)return;
+  state.studySessions=state.studySessions.filter(function(x){return x.id!==id});
+  state.studyLogs[s.date]=Math.max(0,(state.studyLogs[s.date]||0)-s.minutes);
+  if(!state.studyLogs[s.date])delete state.studyLogs[s.date];
+  state.updatedAt=Date.now();saveState();renderStudy();toast("已删除该记录");
+}
+function sumRange(days){
+  var now=new Date();var total=0;
+  for(var i=0;i<days;i++){total+=(state.studyLogs[fmt(new Date(now-i*864e5))]||0)}
+  return total;
+}
+function renderStudy(){
+  renderStudyStats();
+  renderTrendChart();
+  renderSubjTimeChart();
+  renderSessionList();
+  syncTimerButtons();
+}
+function renderStudyStats(){
+  var now=new Date();
+  var today=state.studyLogs[fmt(now)]||0;
+  var week=sumRange(7);
+  var month=sumRange(30);
+  var daysWith=Object.keys(state.studyLogs).filter(function(k){return state.studyLogs[k]>0}).length||1;
+  var allTotal=Object.keys(state.studyLogs).reduce(function(a,k){return a+(state.studyLogs[k]||0)},0);
+  document.getElementById("stToday").textContent=today;
+  document.getElementById("stWeek").textContent=week;
+  document.getElementById("stMonth").textContent=month;
+  document.getElementById("stAvg").textContent=Math.round(allTotal/daysWith);
+}
+function renderTrendChart(){
+  var now=new Date();var days=[];
+  for(var i=13;i>=0;i--){var d=new Date(now-i*864e5);days.push({ds:fmt(d),lb:(d.getMonth()+1)+"/"+d.getDate(),min:state.studyLogs[fmt(d)]||0})}
+  var maxM=Math.max.apply(null,days.map(function(d){return d.min}).concat([60]));
+  var W=680,H=220,PL=34,PR=12,PT=16,PB=26;
+  var cw=(W-PL-PR)/days.length;
+  var y=function(v){return PT+(H-PT-PB)*(1-v/maxM)};
+  var grid="";
+  for(var g=0;g<=4;g++){var gv=Math.round(maxM*g/4);var gy=y(gv);
+    grid+='<line x1="'+PL+'" y1="'+gy.toFixed(1)+'" x2="'+(W-PR)+'" y2="'+gy.toFixed(1)+'" stroke="rgba(255,255,255,.1)" stroke-width="0.5"/>';
+    grid+='<text x="'+(PL-6)+'" y="'+(gy+3.5).toFixed(1)+'" text-anchor="end" font-size="9" fill="#8B93A5">'+gv+'</text>';}
+  var pts=days.map(function(d,i){return (PL+cw*i+cw/2).toFixed(1)+","+y(d.min).toFixed(1)});
+  var area='<polygon points="'+PL+','+(H-PB)+' '+pts.join(" ")+' '+(W-PR)+','+(H-PB)+'" fill="rgba(255,107,26,.16)"/>';
+  var line='<polyline points="'+pts.join(" ")+'" fill="none" stroke="#FF6B1A" stroke-width="2" stroke-linejoin="round"/>';
+  var dots=days.map(function(d,i){var cx=PL+cw*i+cw/2;return '<circle cx="'+cx.toFixed(1)+'" cy="'+y(d.min).toFixed(1)+'" r="'+(d.min>0?3:2)+'" fill="'+(d.min>0?"#FFD60A":"#5C6478")+'"/>'}).join("");
+  var labels=days.map(function(d,i){var cx=PL+cw*i+cw/2;return '<text x="'+cx.toFixed(1)+'" y="'+(H-8)+'" text-anchor="middle" font-size="9" fill="#8B93A5">'+d.lb+'</text>'}).join("");
+  var vals=days.map(function(d,i){if(!d.min)return"";var cx=PL+cw*i+cw/2;return '<text x="'+cx.toFixed(1)+'" y="'+(y(d.min)-7).toFixed(1)+'" text-anchor="middle" font-size="9" fill="#FFD60A" font-weight="700">'+d.min+'</text>'}).join("");
+  document.getElementById("trendChart").innerHTML='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:100%;display:block">'+grid+area+line+dots+vals+labels+'</svg>';
+}
+function renderSubjTimeChart(){
+  var now=new Date();var from=new Date(now-29*864e5).toISOString().slice(0,10);
+  var data=SUBJECTS.concat(["其他"]).map(function(s){
+    var m=state.studySessions.filter(function(x){return x.subject===s&&x.date>=from}).reduce(function(a,b){return a+b.minutes},0);
+    return {s:s,m:m};
+  }).filter(function(d){return d.m>0}).sort(function(a,b){return b.m-a.m});
+  var box=document.getElementById("subjTimeChart");
+  if(!data.length){box.innerHTML='<div class="empty">近 30 天暂无时长记录</div>';return}
+  var total=data.reduce(function(a,b){return a+b.m},0);
+  var max=data[0].m;
+  box.innerHTML=data.map(function(d){
+    var pct=Math.round(d.m/total*100);
+    var hm=Math.floor(d.m/60),mm=d.m%60;
+    var c=SUBJ_COLOR[d.s]||"#8B93A5";
+    return '<div class="bar-row"><div class="hd"><span>'+d.s+'</span><span>'+(hm?hm+"时":"")+mm+"分 · "+pct+'%</span></div><div class="progress"><span style="width:'+Math.round(d.m/max*100)+'%;background:'+c+'"></span></div></div>';
+  }).join("");
+}
+function renderSessionList(){
+  var box=document.getElementById("sessionList");
+  var list=state.studySessions.slice(0,30);
+  if(!list.length){box.innerHTML='<div class="empty">暂无记录，用上方计时器或手动补录添加</div>';return}
+  box.innerHTML=list.map(function(s){
+    var tagCls=SUBJ_TAG[s.subject]||"";
+    var hm=Math.floor(s.minutes/60),mm=s.minutes%60;
+    return '<div class="sess-item">'+
+      '<div class="sess-time">'+(hm?hm+"h":"")+mm+'m</div>'+
+      '<div class="sess-main"><div class="row" style="gap:6px">'+
+      '<span class="tag '+tagCls+'">'+s.subject+'</span>'+
+      '<span style="font-size:11px;color:var(--text-3)">'+s.date+(s.mode==="timer"?" · 计时":" · 补录")+'</span>'+
+      '</div>'+(s.note?'<div class="sess-note">'+s.note+'</div>':'')+'</div>'+
+      '<button class="btn ghost sm" style="padding:3px 9px" onclick="delSession(\''+s.id+'\')">×</button>'+
+      '</div>';
+  }).join("");
+}
+
 function saveWeekGoal(){state.weekGoal=parseInt(document.getElementById("weekGoalInput").value)||600;state.updatedAt=Date.now();saveState();toast("周目标已保存")}
 
 var GRAPH_DATA={
@@ -952,7 +1234,12 @@ function approveRed(id){var r=state.redemptions.find(function(x){return x.id===i
 function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="rejected";state.points+=r.cost;state.updatedAt=Date.now();saveState();renderParent();renderTop();toast("已驳回，积分退还")}}
 function changePwd(){var np=document.getElementById("newPwd").value;if(np.length<4){toast("密码至少4位");return}state.parent.password=np;state.updatedAt=Date.now();saveState();document.getElementById("newPwd").value="";toast("密码已修改")}
 
-loadState().then(function(){renderTop();renderTasks()});
+loadState().then(function(){
+  renderTop();renderTasks();
+  var mnDate=document.getElementById("mnDate");
+  if(mnDate&&!mnDate.value)mnDate.value=curDate;
+  if(state.timer&&state.timer.running)startTimerTick();
+});
 
 // Register Service Worker for PWA
 if ('serviceWorker' in navigator) {
