@@ -1,6 +1,7 @@
 {
   "name": "初二综合学习工作台",
-  "short_name": "学习台",
+  "short_name": "初二学习台",
+  "id": "./",
   "description": "初二语数英+物理+政史地生八科综合学习工作台",
   "start_url": "./",
   "display": "standalone",
