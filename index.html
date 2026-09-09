@@ -12,6 +12,7 @@
 <meta name="msapplication-TileColor" content="#FF6B1A" data-page-node-id="win">
 <meta name="application-name" content="初二综合学习工作台" data-page-node-id="appName">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='18' width='100' height='100' fill='%23FF6B1A'/><text x='50' y='70' font-size='64' text-anchor='middle' fill='%230d0f14' font-weight='800' font-family='system-ui'>学</text></svg>" type="image/svg+xml" data-page-node-id="icon">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>初二综合学习工作台</title>
 <style>
 :root{
@@ -143,6 +144,38 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .img-prev{max-width:100%;max-height:160px;border-radius:6px;margin-top:8px}
 .sync-banner{background:rgba(255,214,10,.1);color:var(--signal);text-align:center;padding:6px;font-size:12px;display:none;border-bottom:1px solid rgba(255,214,10,.2)}
 .sync-banner.show{display:block}
+/* ===== 阶段目标管控 ===== */
+.plan-card{border-left:3px solid var(--accent)}
+.plan-toggle{flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.plan-name{font-size:16px;font-weight:800;letter-spacing:.3px}
+.plan-sub{font-size:11px;color:var(--text-3);margin-top:2px}
+.plan-days{font-size:11px;font-weight:700;padding:2px 10px;border-radius:20px;white-space:nowrap}
+.plan-days.hot{background:var(--red-soft);color:var(--red)}
+.plan-days.ok{background:var(--amber-soft);color:var(--signal)}
+.plan-days.done{background:rgba(92,100,120,.2);color:var(--text-3)}
+.plan-arrow{transition:.2s;color:var(--text-3);font-size:12px}
+.plan-arrow.open{transform:rotate(90deg)}
+.plan-body{display:none;margin-top:14px;border-top:1px dashed var(--border);padding-top:14px}
+.plan-body.open{display:block}
+.pg-head{display:flex;align-items:center;gap:10px;margin:12px 0 6px}
+.pg-name{font-size:13px;font-weight:700;min-width:44px}
+.pg-bar{flex:1}
+.pg-cnt{font-size:11px;color:var(--text-3);min-width:62px;text-align:right;font-variant-numeric:tabular-nums}
+.pitem{display:flex;align-items:center;gap:10px;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;background:#10131b;transition:.15s}
+.pitem:hover{border-color:var(--border-2)}
+.pitem.done{opacity:.5}
+.pitem.done .pt-title{text-decoration:line-through}
+.pitem .check{flex:none}
+.pt-main{flex:1;min-width:0}
+.pt-title{font-size:14px;word-break:break-all}
+.pt-meta{font-size:11px;margin-top:2px}
+.due-over{color:var(--red);font-weight:700}
+.due-today{color:var(--signal);font-weight:700}
+.due-ok{color:var(--text-3)}
+.padd-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;align-items:flex-end}
+.padd-title{flex:1;min-width:180px}
+.alert-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;background:#10131b}
+.plan-empty{text-align:center;padding:26px 14px;color:var(--text-3);font-size:13px}
 </style>
 </head>
 <body data-page-node-id="a5lGxOVgq8JrSYLpXyDbLB">
@@ -165,6 +198,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
     <div class="nav-item active" data-page="tasks" onclick="nav('tasks')" data-page-node-id="lllIR58oWkI0xEuDx0TNlE"><span class="ic" data-page-node-id="I8HCno9SDegoUZTxlJxXCK">📋</span>任务中枢</div>
     <div class="nav-item" data-page="dashboard" onclick="nav('dashboard')" data-page-node-id="DejHhpEDxjAZZIRytN60fa"><span class="ic" data-page-node-id="T3KgRT2l2YyAsm0D4tDPTl">📊</span>学科仪表盘</div>
     <div class="nav-item" data-page="study" onclick="nav('study')"><span class="ic">⏱️</span>学时记录</div>
+    <div class="nav-item" data-page="plan" onclick="nav('plan')"><span class="ic">🎯</span>阶段目标</div>
     <div class="nav-item" data-page="wrong" onclick="nav('wrong')" data-page-node-id="bcB4PEyNXZ6DV5mxaOeC14"><span class="ic" data-page-node-id="AmCw78hhP5nXd1xtZQ7QwA">📝</span>错题难题库</div>
     <div class="nav-item" data-page="review" onclick="nav('review')" data-page-node-id="dKT85RSEbHnJJqrzzrEmeL"><span class="ic" data-page-node-id="wbsXtScKXFFHi2hTLhJAuZ">📈</span>复盘引擎</div>
     <div class="nav-item" data-page="graph" onclick="nav('graph')" data-page-node-id="qB3BCiDWvlLanndpucX4JZ"><span class="ic" data-page-node-id="7PYK2ReMUXiLTEYwDFssiM">🕸️</span>知识图谱</div>
@@ -293,6 +327,47 @@ input,select,textarea{font-family:inherit;font-size:14px}
         <div class="card-h">历史记录 <span style="font-size:12px;color:var(--text-3);font-weight:400">最近 30 条</span></div>
         <div id="sessionList"></div>
       </div>
+    </section>
+
+    <section class="page" id="page-plan">
+      <h1 class="page-title">阶段目标管控</h1>
+      <p class="page-sub">把期中 / 期末等大考的复习拆成各科可执行清单 —— 倒计时、完成进度、逾期提醒一次看清</p>
+
+      <div class="grid g4" style="margin-bottom:16px">
+        <div class="metric"><div class="v" id="plActive">0</div><div class="l">跟进中阶段</div></div>
+        <div class="metric"><div class="v" id="plTaskStat">0/0</div><div class="l">计划任务</div></div>
+        <div class="metric"><div class="v" id="plOverdue">0</div><div class="l">逾期未完成</div></div>
+        <div class="metric"><div class="v" id="plNext">--</div><div class="l" id="plNextL">最近考试</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">⏳ 待办提醒</div>
+        <div id="planAlert"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">新建阶段</div>
+        <div class="row">
+          <div style="flex:1;min-width:170px">
+            <label class="label">阶段名称</label>
+            <input class="input" id="plName" placeholder="如：期中考试 / 期末冲刺" maxlength="12">
+          </div>
+          <div style="min-width:160px">
+            <label class="label">考试日期</label>
+            <input class="input" id="plDate" type="date">
+          </div>
+          <button class="btn" style="align-self:flex-end" onclick="addPhase()">＋ 建立阶段</button>
+        </div>
+        <div class="row" style="margin-top:12px;flex-wrap:wrap;gap:8px;align-items:center">
+          <span style="font-size:12px;color:var(--text-3)">快捷创建：</span>
+          <button class="btn ghost sm" onclick="quickPhase('期中考试',48)">📘 期中考试</button>
+          <button class="btn ghost sm" onclick="quickPhase('期末考试',118)">📗 期末考试</button>
+          <button class="btn ghost sm" onclick="quickPhase('月考',24)">📕 月考</button>
+          <span style="font-size:11px;color:var(--text-3)">日期可随时改，也可先删再建</span>
+        </div>
+      </div>
+
+      <div id="planList"></div>
     </section>
 
     <section class="page" id="page-review" data-page-node-id="i5ZScML3BvcLDgqoTdvxWY">
@@ -435,6 +510,17 @@ input,select,textarea{font-family:inherit;font-size:14px}
 
 <div class="toast" id="toast" data-page-node-id="mCr7uSPNKq3mfaNz7xX37d"></div>
 
+<div class="modal-mask" id="uiModal">
+  <div class="modal" style="width:min(400px,92vw)">
+    <h3 id="uiTitle" style="margin-bottom:12px">操作确认</h3>
+    <div id="uiBody" style="color:var(--text-2);font-size:14px;line-height:1.75;overflow-wrap:break-word"></div>
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+      <button class="btn ghost sm" onclick="closeUiModal()">取消</button>
+      <button class="btn sm danger" id="uiOk" style="display:inline-flex" onclick="okUiModal()">确定</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var APP_VER="2026-09-05-v3";
 var SUBJECTS=["语文","数学","英语","物理","政治","历史","地理","生物"];
@@ -459,6 +545,7 @@ var defaultState=function(){
     weekGoal:600, studyLogs:{},
     studySessions:[],
     timer:null,
+    phases:[],
     parent:{password:"1234",authed:false,freezeThreshold:200},
     settings:{theme:"light",sound:true}
   };
@@ -538,6 +625,7 @@ function mergeStates(local,cloud){
   result.redemptions=mergeById(local.redemptions,cloud.redemptions);
   result.studySessions=mergeById(local.studySessions,cloud.studySessions);
   result.timer=pickNewer(local.timer,cloud.timer)||null;
+  result.phases=mergeById(local.phases,cloud.phases);
   var unionByKey=function(la,ca,key){
     var seen={};
     return (la||[]).concat(ca||[]).filter(function(x){if(!x)return false;var k=x[key];if(seen[k])return false;seen[k]=1;return true});
@@ -578,6 +666,7 @@ function normalizeState(){
   if(!state.studySessions)state.studySessions=[];
   if(!state.studyLogs)state.studyLogs={};
   if(!state.timer)state.timer=null;
+  if(!state.phases)state.phases=[];
 }
 
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},1800)}
@@ -592,7 +681,7 @@ function nav(page){
   document.querySelectorAll(".nav-item").forEach(function(n){n.classList.remove("active")});
   var navEl=document.querySelector('.nav-item[data-page="'+page+'"]');
   if(navEl)navEl.classList.add("active");
-  var r={tasks:renderTasks,dashboard:renderDashboard,study:renderStudy,wrong:renderWrong,review:renderReview,graph:renderGraph,mall:renderMall,parent:renderParent}[page];
+  var r={tasks:renderTasks,dashboard:renderDashboard,study:renderStudy,plan:renderPlan,wrong:renderWrong,review:renderReview,graph:renderGraph,mall:renderMall,parent:renderParent}[page];
   if(r)r();
 }
 
@@ -640,6 +729,34 @@ function renderTasks(){
 }
 function openTaskModal(){document.getElementById("taskModal").classList.add("show")}
 function closeModal(id){document.getElementById(id).classList.remove("show")}
+function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
+var UI_OK_CB=null;
+function openUiModal(title,bodyHtml,okLabel,isDanger,okCb){
+  document.getElementById("uiTitle").textContent=title;
+  document.getElementById("uiBody").innerHTML=bodyHtml;
+  var ok=document.getElementById("uiOk");
+  ok.textContent=okLabel||"确定";
+  ok.className="btn sm "+(isDanger===false?"":"danger");
+  UI_OK_CB=okCb||null;
+  document.getElementById("uiModal").classList.add("show");
+}
+function closeUiModal(){document.getElementById("uiModal").classList.remove("show");UI_OK_CB=null}
+function okUiModal(){var cb=UI_OK_CB;UI_OK_CB=null;closeUiModal();if(cb)cb()}
+function uiConfirm(msg,okCb){openUiModal("操作确认",msg,"确定",true,okCb)}
+function uiPrompt(title,msg,defVal,okCb){
+  var box=document.getElementById("uiBody");
+  box.innerHTML=msg;
+  var el=document.createElement("input");
+  el.className="input";el.value=defVal||"";el.maxLength=30;
+  el.style.cssText="margin-top:10px;width:100%;box-sizing:border-box";
+  box.appendChild(el);
+  document.getElementById("uiTitle").textContent=title;
+  var ok=document.getElementById("uiOk");
+  ok.textContent="保存";ok.className="btn sm";
+  UI_OK_CB=function(){okCb((el.value||"").trim())};
+  document.getElementById("uiModal").classList.add("show");
+  setTimeout(function(){try{el.focus();el.select()}catch(e){}},80);
+}
 function addTask(){
   var t={id:uid("t_"),subject:document.getElementById("tSubj").value,title:document.getElementById("tTitle").value.trim(),type:document.getElementById("tType").value,points:parseInt(document.getElementById("tPts").value)||0,done:false,date:curDate,createdAt:Date.now()};
   if(!t.title){toast("请填写任务内容");return}
@@ -1047,6 +1164,209 @@ function renderSessionList(){
   }).join("");
 }
 
+/* ============ 阶段目标管控模块 ============ */
+var PLAN_OPEN={};
+function planAccent(name){
+  if(name.indexOf("期中")>=0)return "#3B9DFF";
+  if(name.indexOf("期末")>=0||name.indexOf("中考")>=0)return "#FF4D5E";
+  if(name.indexOf("月考")>=0)return "#FFD60A";
+  return "#FF6B1A";
+}
+function dayDiff(dateStr){
+  if(!dateStr)return 0;
+  var t=new Date(curDate+"T00:00:00Z").getTime();
+  var d=new Date(dateStr+"T00:00:00Z").getTime();
+  return Math.round((d-t)/86400000);
+}
+function addDays(n){return new Date(Date.now()+n*864e5).toISOString().slice(0,10)}
+function phaseStat(ph){
+  var items=ph.items||[];
+  var done=items.filter(function(x){return x.done}).length;
+  var over=items.filter(function(x){return !x.done&&x.due&&x.due<curDate}).length;
+  var today=items.filter(function(x){return !x.done&&x.due&&x.due===curDate}).length;
+  return {total:items.length,done:done,over:over,today:today};
+}
+function expandPlan(id){PLAN_OPEN[id]=!PLAN_OPEN[id];renderPlan()}
+function addPhase(){
+  var name=(document.getElementById("plName").value||"").trim();
+  var date=document.getElementById("plDate").value;
+  if(!name){toast("请填写阶段名称");return}
+  if(!date){toast("请选择考试日期");return}
+  var exists=state.phases.some(function(p){return p.name===name});
+  if(exists){toast("已有同名阶段，直接在列表里加任务");return}
+  state.phases.push({id:uid("ph_"),name:name,examDate:date,items:[],createdAt:Date.now(),updatedAt:Date.now()});
+  PLAN_OPEN[state.phases[state.phases.length-1].id]=true;
+  state.updatedAt=Date.now();saveState();
+  document.getElementById("plName").value="";
+  document.getElementById("plDate").value=addDays(48);
+  renderPlan();toast("已建立阶段："+name);
+}
+function quickPhase(name,days){
+  if(state.phases.some(function(p){return p.name===name})){toast(name+" 已存在，直接在列表里加任务");return}
+  var ph={id:uid("ph_"),name:name,examDate:addDays(days),items:[],createdAt:Date.now(),updatedAt:Date.now()};
+  state.phases.push(ph);PLAN_OPEN[ph.id]=true;
+  state.updatedAt=Date.now();saveState();renderPlan();
+  toast("已创建"+name+"，考试日 "+ph.examDate.slice(5)+"，点卡片加各科任务");
+}
+function delPhase(id){
+  var ph=state.phases.find(function(x){return x.id===id});if(!ph)return;
+  var cnt=(ph.items||[]).length;
+  uiConfirm('确定删除阶段「<b style="color:var(--red)">'+esc(ph.name)+'</b>」吗？<br>将一并删除其中 '+cnt+' 条计划任务，<b>不可恢复</b>。',function(){
+    state.phases=state.phases.filter(function(x){return x.id!==id});
+    delete PLAN_OPEN[id];
+    state.updatedAt=Date.now();saveState();renderPlan();toast("已删除阶段");
+  });
+}
+function renamePhase(id){
+  var ph=state.phases.find(function(x){return x.id===id});if(!ph)return;
+  uiPrompt("重命名阶段","输入新的阶段名称：",ph.name,function(nn){
+    if(!nn){toast("名称不能为空");return}
+    ph.name=nn;ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();renderPlan();toast("已重命名");
+  });
+}
+function setPhaseDate(id,val){
+  var ph=state.phases.find(function(x){return x.id===id});if(!ph||!val)return;
+  ph.examDate=val;ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();
+  renderPlan();toast("考试日期已更新");
+}
+function addPlanItem(pid){
+  var ph=state.phases.find(function(x){return x.id===pid});if(!ph)return;
+  var title=(document.getElementById("piTitle_"+pid).value||"").trim();
+  if(!title){toast("请填写任务内容");return}
+  ph.items.push({id:uid("pi_"),subj:document.getElementById("piSubj_"+pid).value,title:title,due:document.getElementById("piDue_"+pid).value||"",done:false,createdAt:Date.now()});
+  ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();
+  document.getElementById("piTitle_"+pid).value="";
+  document.getElementById("piDue_"+pid).value="";
+  renderPlan();toast("已加入计划");
+}
+function togglePlanItem(pid,iid){
+  var ph=state.phases.find(function(x){return x.id===pid});if(!ph)return;
+  var it=ph.items.find(function(x){return x.id===iid});if(!it)return;
+  it.done=!it.done;
+  ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();renderPlan();
+}
+function delPlanItem(pid,iid){
+  var ph=state.phases.find(function(x){return x.id===pid});if(!ph)return;
+  ph.items=ph.items.filter(function(x){return x.id!==iid});
+  ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();renderPlan();toast("已删除该任务");
+}
+function completePhase(id){
+  var ph=state.phases.find(function(x){return x.id===id});if(!ph)return;
+  ph.items.forEach(function(x){x.done=true});
+  ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();renderPlan();toast("已全部完成 ✔");
+}
+function dueLabel(it){
+  if(it.done||!it.due)return "";
+  var d=dayDiff(it.due);
+  if(d<0)return '<span class="due-over">逾期 '+( -d)+' 天</span>';
+  if(d===0)return '<span class="due-today">今天截止</span>';
+  return '<span class="due-ok">截止 '+(it.due.length===10?it.due.slice(5):it.due)+'</span>';
+}
+function renderPlan(){
+  renderPlanAlert();
+  renderPlanStats();
+  renderPlanList();
+}
+function renderPlanAlert(){
+  var box=document.getElementById("planAlert");
+  if(!box)return;
+  var phases=state.phases||[];
+  if(!phases.length){box.innerHTML='<div class="plan-empty">还没有阶段目标 —— 先在上方创建「期中考试 / 期末考试」，再往各科里加复习任务</div>';return}
+  var list=[];
+  phases.forEach(function(p){(p.items||[]).forEach(function(it){if(!it.done&&it.due&&it.due<=curDate)list.push({p:p,it:it})})});
+  if(!list.length){box.innerHTML='<div style="padding:8px 2px;font-size:13px;color:var(--green)">✔ 没有逾期、也没有今天截止的计划项，节奏很好</div>';return}
+  list.sort(function(a,b){return a.it.due<b.it.due?-1:1});
+  box.innerHTML=list.slice(0,8).map(function(o){
+    var tagCls=SUBJ_TAG[o.it.subj]||"";
+    var dl=o.it.due===curDate?'<span class="due-today">今天截止</span>':'<span class="due-over">逾期 '+(-dayDiff(o.it.due))+' 天</span>';
+    return '<div class="alert-item">'+
+      '<div class="check" onclick="togglePlanItem(\''+o.p.id+'\',\''+o.it.id+'\')"></div>'+
+      '<div class="pt-main"><div class="pt-title">'+o.it.title+'</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:2px"><span class="tag '+tagCls+'">'+o.it.subj+'</span> · '+o.p.name+' · '+dl+'</div></div>'+
+      '<button class="btn ghost sm" style="padding:3px 9px" onclick="delPlanItem(\''+o.p.id+'\',\''+o.it.id+'\')">×</button></div>';
+  }).join("");
+}
+function renderPlanStats(){
+  var phases=state.phases||[];
+  var allItems=[],overCnt=0;
+  phases.forEach(function(p){allItems=allItems.concat(p.items||[])});
+  overCnt=allItems.filter(function(x){return !x.done&&x.due&&x.due<curDate}).length;
+  var doneCnt=allItems.filter(function(x){return x.done}).length;
+  var active=phases.filter(function(p){return dayDiff(p.examDate)>=0||(p.items||[]).some(function(x){return !x.done})}).length;
+  var future=phases.filter(function(p){return dayDiff(p.examDate)>=0}).sort(function(a,b){return a.examDate<b.examDate?-1:1});
+  var elA=document.getElementById("plActive");if(elA)elA.textContent=active;
+  var elT=document.getElementById("plTaskStat");if(elT)elT.textContent=doneCnt+"/"+allItems.length;
+  var elO=document.getElementById("plOverdue");
+  if(elO){elO.textContent=overCnt;elO.style.color=overCnt?"var(--red)":""}
+  var elN=document.getElementById("plNext");
+  if(elN)elN.textContent=future.length?dayDiff(future[0].examDate)+"天":"--";
+  var elL=document.getElementById("plNextL");
+  if(elL)elL.textContent=future.length?future[0].name+"考试":"最近考试";
+}
+function renderPlanList(){
+  var box=document.getElementById("planList");
+  if(!box)return;
+  var phases=(state.phases||[]).slice().sort(function(a,b){return a.examDate<b.examDate?-1:1});
+  if(!phases.length){box.innerHTML='<div class="card"><div class="plan-empty">空状态：还没有阶段计划。点上方「📘 期中考试」一键创建，日期会自动算好（可改）</div></div>';return}
+  box.innerHTML=phases.map(function(p){return planCard(p)}).join("");
+}
+function planCard(p){
+  var s=phaseStat(p),dd=dayDiff(p.examDate),open=!!PLAN_OPEN[p.id];
+  var acc=planAccent(p.name);
+  var pct=s.total?Math.round(s.done/s.total*100):0;
+  var badge=dd<0?'<span class="plan-days done">已结束</span>':(dd===0?'<span class="plan-days hot">今天考试</span>':(dd<=7?'<span class="plan-days hot">仅剩 '+dd+' 天</span>':'<span class="plan-days ok">T-'+dd+' 天</span>'));
+  var overTip=s.over?'<span class="due-over" style="font-size:11px">'+s.over+' 项逾期</span>':'';
+  var grp={};
+  (p.items||[]).forEach(function(it){(grp[it.subj]=grp[it.subj]||[]).push(it)});
+  var defSubj="数学";
+  for(var si=0;si<SUBJECTS.length;si++){var ga=grp[SUBJECTS[si]];if(ga&&ga.some(function(x){return !x.done})){defSubj=SUBJECTS[si];break}}
+  var rows="";
+  SUBJECTS.concat(["其他"]).forEach(function(sj){
+    if(!grp[sj])return;
+    var arr=grp[sj],dn=arr.filter(function(x){return x.done}).length;
+    var c=SUBJ_COLOR[sj]||"#8B93A5";
+    rows+='<div class="pg-head"><div class="pg-name" style="color:'+c+'">'+sj+'</div>'+
+      '<div class="pg-bar"><div class="progress"><span style="width:'+Math.round(dn/arr.length*100)+'%;background:'+c+'"></span></div></div>'+
+      '<div class="pg-cnt">'+dn+'/'+arr.length+'</div></div>';
+    rows+=arr.map(function(it){
+      return '<div class="pitem '+(it.done?'done':'')+'">'+
+        '<div class="check '+(it.done?'on':'')+'" onclick="togglePlanItem(\''+p.id+'\',\''+it.id+'\')">'+(it.done?'✓':'')+'</div>'+
+        '<div class="pt-main"><div class="pt-title">'+it.title+'</div>'+(it.due?'<div class="pt-meta">'+dueLabel(it)+'</div>':'')+'</div>'+
+        '<button class="btn ghost sm" style="padding:3px 9px" onclick="delPlanItem(\''+p.id+'\',\''+it.id+'\')">×</button></div>';
+    }).join("");
+  });
+  if(!(p.items||[]).length)rows='<div class="plan-empty" style="padding:14px">还没有计划任务 —— 下方选科目、填任务、可设截止日，点「添加」</div>';
+  var opts=SUBJECTS.concat(["其他"]).map(function(s){return '<option'+(s===defSubj?' selected':'')+'>'+s+'</option>'}).join("");
+  var btnAll=(s.total&&s.done<s.total)?'<button class="btn ghost sm" onclick="completePhase(\''+p.id+'\')">✔ 全部完成</button>':'';
+  var pctColor=pct===100?"var(--green)":(s.over?"var(--red)":"var(--accent)");
+  return '<div class="card plan-card" style="border-left-color:'+acc+'">'+
+    '<div class="plan-head">'+
+      '<div class="plan-toggle" onclick="expandPlan(\''+p.id+'\')">'+
+        '<div><div class="plan-name" style="color:'+acc+'">'+p.name+'</div>'+
+        '<div class="plan-sub">考试 '+(p.examDate||"—")+'　'+badge+'　'+overTip+'</div></div>'+
+        '<div style="margin-left:auto;text-align:right;min-width:70px">'+
+          '<div style="font-size:20px;font-weight:800;color:'+pctColor+'">'+pct+'%</div>'+
+          '<div style="font-size:11px;color:var(--text-3)">'+s.done+'/'+s.total+' 完成</div></div>'+
+        '<div class="plan-arrow '+(open?'open':'')+'">▶</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:6px">'+
+        '<button class="btn ghost sm" style="padding:3px 9px" onclick="renamePhase(\''+p.id+'\')">改名</button>'+
+        '<button class="btn ghost sm danger" style="padding:3px 9px" onclick="delPhase(\''+p.id+'\')">删除</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="plan-body '+(open?'open':'')+'">'+
+      rows+
+      '<div class="padd-row">'+
+        '<select class="select" id="piSubj_'+p.id+'" style="min-width:104px">'+opts+'</select>'+
+        '<input class="input padd-title" id="piTitle_'+p.id+'" placeholder="任务内容，如：函数单元卷订正">'+
+        '<input class="input" id="piDue_'+p.id+'" type="date" style="min-width:158px">'+
+        '<button class="btn" onclick="addPlanItem(\''+p.id+'\')">＋ 添加</button>'+
+      '</div>'+
+      '<div style="margin-top:10px;text-align:right">'+btnAll+'</div>'+
+    '</div>'+
+  '</div>';
+}
+
 function saveWeekGoal(){state.weekGoal=parseInt(document.getElementById("weekGoalInput").value)||600;state.updatedAt=Date.now();saveState();toast("周目标已保存")}
 
 var GRAPH_DATA={
@@ -1238,6 +1558,8 @@ loadState().then(function(){
   renderTop();renderTasks();
   var mnDate=document.getElementById("mnDate");
   if(mnDate&&!mnDate.value)mnDate.value=curDate;
+  var plDateEl=document.getElementById("plDate");
+  if(plDateEl&&!plDateEl.value)plDateEl.value=addDays(48);
   if(state.timer&&state.timer.running)startTimerTick();
 });
 
