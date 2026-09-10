@@ -620,7 +620,7 @@ function readLocal(){
 function saveState(){
   try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
   if(hasSDK()&&dbState.online)pushToCloud(state);
-  else if(!hasSDK()&&ghEnabled())pushToGitHub();
+  else if(!hasSDK()&&ghEnabled()){state._dirty=true;pushToGitHub()}
 }
 function pushToCloud(s){
   if(dbState.syncing)return;
@@ -681,8 +681,10 @@ function ghPushNow(){
     return ghApi('PUT','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH,body);
   }).then(function(res){
     if(res&&res.content&&res.content.sha)ghState.sha=res.content.sha;
+    state._dirty=false;
     ghState.lastErr="";setSync('synced');
   }).catch(function(err){
+    state._dirty=true;
     ghState.lastErr=(err&&err.message)||String(err);ghState.sha=null;setSync('offline');
   }).then(function(){ghState.syncing=false});
 }
@@ -721,6 +723,33 @@ function ghDisable(){
   try{localStorage.setItem(GH_SYNC_KEY,JSON.stringify(c))}catch(e){}
   ghState.sha=null;ghRenderStatus();toast('已停用云同步，数据仅存本机');
 }
+
+// ===== 同步自愈：离线自动重试 + 回到页面自动拉云端，无需手动刷新 =====
+var ghFocusAt=0,ghRetryTimer=null;
+function ghRecover(silent){
+  if(!ghEnabled()||hasSDK()||ghState.syncing)return Promise.resolve();
+  var now=Date.now();
+  if(!silent&&now-ghFocusAt<30000)return Promise.resolve();  // 30s 节流
+  ghFocusAt=now;
+  return ghPull().then(function(cloud){
+    var cloudNewer=cloud&&cloud.updatedAt>(state.updatedAt||0)+500;
+    if(cloudNewer&&!document.hidden){
+      var local=state;
+      state=mergeStates(local,cloud);normalizeState();
+      try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
+      renderTop();
+      var act=document.querySelector('.nav-item.active');
+      var pg=act&&act.getAttribute('data-page');
+      if(pg&&pg!=='parent')nav(pg);   // 家长页不自动重渲染，避免打断输入
+    }else if(cloudNewer){state._dirty=true}
+    ghState.lastErr="";setSync('synced');
+    if(state._dirty)ghPushNow();          // 离线期间的本地改动自动补推
+  }).catch(function(){
+    if(!ghRetryTimer)ghRetryTimer=setTimeout(function(){ghRetryTimer=null;ghRecover(true)},60000);
+  });
+}
+document.addEventListener('visibilitychange',function(){if(!document.hidden)ghRecover(false)});
+window.addEventListener('focus',function(){ghRecover(false)});
 
 function mergeStates(local,cloud){
   var result={};
