@@ -653,11 +653,22 @@ function ghApi(method,path,body){
 function utf8B64(s){return btoa(unescape(encodeURIComponent(s)))}
 function b64Utf8(s){try{return decodeURIComponent(escape(atob(String(s).replace(/\n/g,""))))}catch(e){return ""}}
 function ghPull(){
-  return ghApi('GET','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH).then(function(res){
-    if(!res){ghState.sha=null;return null}
-    ghState.sha=res.sha;
-    return safeParse(b64Utf8(res.content));
-  });
+  var url='https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH;
+  var parse=function(j){
+    if(!j){ghState.sha=null;return null}
+    ghState.sha=j.sha;
+    return safeParse(b64Utf8(j.content));
+  };
+  return fetch(url,{headers:{'Accept':'application/vnd.github.v3+json'}})
+    .then(function(r){
+      if(r.status===404)return null;
+      if(!r.ok)throw new Error('匿名GET '+r.status);
+      return r.json();
+    })
+    .then(parse)
+    .catch(function(){
+      return ghApi('GET','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH).then(parse);
+    });
 }
 function ghPushNow(){
   if(ghState.syncing)return Promise.resolve();
@@ -753,8 +764,13 @@ function setSync(status){
   var txt=document.getElementById('syncText');
   var banner=document.getElementById('syncBanner');
   dot.className='sync-dot'+(status==='offline'?' off':(status==='syncing'?' syncing':''));
-  txt.textContent=status==='synced'?'已同步':(status==='syncing'?'同步中':(status==='offline'?'离线':'本地'));
+  txt.textContent=status==='synced'?'已同步':(status==='syncing'?'同步中':(status==='offline'?(ghState.lastErr?'离线':'离线'):'本地'));
   banner.className='sync-banner'+(status==='offline'&&(hasSDK()||ghEnabled())?' show':'');
+  if(status==='offline'&&ghState.lastErr){
+    banner.textContent='云端读取失败（'+ghState.lastErr+'）— 数据暂存本机未丢失，网络恢复后重开页面自动同步';
+  }else if(status!=='offline'){
+    banner.textContent='离线模式：数据暂存本地，恢复网络后将自动同步到云端';
+  }
 }
 
 function normalizeState(){
