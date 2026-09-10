@@ -446,6 +446,13 @@ input,select,textarea{font-family:inherit;font-size:14px}
             <div class="field" data-page-node-id="F4sHJRRbaIQn7ntd4OOUAH"><label class="label" data-page-node-id="BPkGeC6Dn0XYvlMHZenyRP">异常积分冻结阈值(分)</label><input class="input" id="freezeTh" type="number" min="0" placeholder="单日超此值触发审查" data-page-node-id="QLU7CKFKPXUKGfZFl1PPM2"></div>
             <button class="btn sm ghost" onclick="parentLogout()" data-page-node-id="d7NGFhTbpGjEmEyGqvjpTp">退出家长模式</button>
           </div>
+          <div class="card" id="ghSyncCard">
+            <div class="card-h">多端云同步（GitHub 通道）</div>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:10px">孩子设备上的记录默认只存本机。在<b>每台设备</b>上粘贴同一个 GitHub Token 并启用，学时/积分/任务/错题即通过 GitHub 云端互通。Token 只存在各设备浏览器内，不写入网页代码。</p>
+            <div class="field"><label class="label">GitHub Token（ghp_ 或 github_pat_ 开头）</label><input class="input" id="ghToken" type="password" placeholder="粘贴 Token"></div>
+            <div class="row" style="margin-bottom:10px"><button class="btn sm" onclick="ghSaveToken()">保存并启用</button><button class="btn sm ghost" onclick="ghDisable()">停用</button></div>
+            <p id="ghStatus" style="font-size:12px;margin-top:4px"></p>
+          </div>
         </div>
       </div>
     </section>
@@ -529,6 +536,9 @@ var SUBJ_COLOR={语文:"#FF4D5E",数学:"#3B9DFF",英语:"#2DE0C8",物理:"#FFA0
 var SUBJ_TAG={语文:"yu",数学:"shu",英语:"ying",物理:"wu",政治:"zheng",历史:"shi",地理:"di",生物:"sheng"};
 var DATABASE_ID="pnCUnO09ylRJpdKiRfHP8A";
 var STATE_KEY="cz2_state";
+var GH_SYNC_KEY="cz2_gh_sync";
+var GH_OWNER="tiger76-19",GH_REPO="cz2-learning-station",GH_PATH="data/state.json";
+var ghState={syncing:false,sha:null,debounce:null,lastErr:""};
 
 var defaultState=function(){
   return {
@@ -565,7 +575,21 @@ function loadState(){
   return new Promise(function(resolve){
     var local=readLocal();
     if(!hasSDK()){
-      state=local||defaultState();normalizeState();setSync('offline');resolve();return;
+      state=local||defaultState();normalizeState();
+      if(ghEnabled()){
+        setSync('syncing');
+        ghPull().then(function(cloud){
+          if(cloud&&local){state=mergeStates(local,cloud);}
+          else if(cloud){state=cloud;}
+          normalizeState();
+          state.updatedAt=Date.now();
+          try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
+          setSync('synced');
+        }).catch(function(){setSync('offline')})
+        .then(function(){resolve()});
+        return;
+      }
+      setSync('offline');resolve();return;
     }
     setSync('syncing');
     var db=window.__SMART_PAGE__.database;
@@ -596,6 +620,7 @@ function readLocal(){
 function saveState(){
   try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
   if(hasSDK()&&dbState.online)pushToCloud(state);
+  else if(!hasSDK()&&ghEnabled())pushToGitHub();
 }
 function pushToCloud(s){
   if(dbState.syncing)return;
@@ -606,6 +631,84 @@ function pushToCloud(s){
   if(dbState.recordId){p=db.updateRecord({databaseId:DATABASE_ID,recordId:dbState.recordId,properties:payload})}
   else{p=db.addRecord({databaseId:DATABASE_ID,properties:payload}).then(function(r){if(r&&r.id)dbState.recordId=r.id})}
   p.then(function(){setSync('synced')}).catch(function(){setSync('offline');dbState.online=false}).then(function(){dbState.syncing=false});
+}
+
+// ===== GitHub 云同步（无资料库 SDK 环境下的多端通道：设备 → 仓库 data/state.json → 设备） =====
+function ghCfg(){
+  try{return JSON.parse(localStorage.getItem(GH_SYNC_KEY))||null}catch(e){return null}
+}
+function ghEnabled(){var c=ghCfg();return !!(c&&c.token&&c.enabled)}
+function ghApi(method,path,body){
+  var cfg=ghCfg();
+  return fetch('https://api.github.com'+path,{
+    method:method,
+    headers:{'Authorization':'token '+cfg.token,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'},
+    body:body?JSON.stringify(body):undefined
+  }).then(function(r){
+    if(r.status===404)return null;
+    if(!r.ok)return r.json().catch(function(){return{}}).then(function(j){throw new Error(r.status+' '+(j&&j.message||''))});
+    return r.json();
+  });
+}
+function utf8B64(s){return btoa(unescape(encodeURIComponent(s)))}
+function b64Utf8(s){try{return decodeURIComponent(escape(atob(String(s).replace(/\n/g,""))))}catch(e){return ""}}
+function ghPull(){
+  return ghApi('GET','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH).then(function(res){
+    if(!res){ghState.sha=null;return null}
+    ghState.sha=res.sha;
+    return safeParse(b64Utf8(res.content));
+  });
+}
+function ghPushNow(){
+  if(ghState.syncing)return Promise.resolve();
+  ghState.syncing=true;setSync('syncing');
+  return ghPull().then(function(cloud){
+    if(cloud&&cloud.updatedAt>(state.updatedAt||0)+1000){state=mergeStates(state,cloud);normalizeState();}
+    state.updatedAt=Date.now();
+    var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(state))};
+    if(ghState.sha)body.sha=ghState.sha;
+    return ghApi('PUT','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH,body);
+  }).then(function(res){
+    if(res&&res.content&&res.content.sha)ghState.sha=res.content.sha;
+    ghState.lastErr="";setSync('synced');
+  }).catch(function(err){
+    ghState.lastErr=(err&&err.message)||String(err);ghState.sha=null;setSync('offline');
+  }).then(function(){ghState.syncing=false});
+}
+function pushToGitHub(){
+  if(ghState.debounce)clearTimeout(ghState.debounce);
+  setSync('syncing');
+  ghState.debounce=setTimeout(ghPushNow,3000);
+}
+function ghRenderStatus(){
+  var el=document.getElementById('ghStatus');if(!el)return;
+  var c=ghCfg();
+  if(c&&c.token&&c.enabled){
+    el.textContent=ghState.lastErr?('已启用，上次同步失败：'+ghState.lastErr):'已启用：数据将通过 GitHub 云端多端同步';
+    el.style.color=ghState.lastErr?'var(--red)':'var(--green)';
+  }else if(c&&c.token){
+    el.textContent='Token 已保存但未启用';el.style.color='var(--text-2)';
+  }else{
+    el.textContent='未配置（当前仅本机存储）';el.style.color='var(--text-2)';
+  }
+}
+function ghSaveToken(){
+  var v=document.getElementById('ghToken').value.trim();
+  if(!v){toast('请输入 Token');return}
+  fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO,{headers:{'Authorization':'token '+v,'Accept':'application/vnd.github.v3+json'}})
+    .then(function(r){if(!r.ok)throw new Error(r.status===401?'Token 无效或已过期':'校验失败 '+r.status);return r.json()})
+    .then(function(){
+      localStorage.setItem(GH_SYNC_KEY,JSON.stringify({token:v,enabled:true}));
+      ghState.sha=null;toast('Token 有效，云同步已启用');
+      return ghPushNow();
+    })
+    .catch(function(e){toast('保存失败：'+e.message)})
+    .then(function(){ghRenderStatus()});
+}
+function ghDisable(){
+  var c=ghCfg()||{token:'',enabled:false};c.enabled=false;
+  try{localStorage.setItem(GH_SYNC_KEY,JSON.stringify(c))}catch(e){}
+  ghState.sha=null;ghRenderStatus();toast('已停用云同步，数据仅存本机');
 }
 
 function mergeStates(local,cloud){
@@ -651,7 +754,7 @@ function setSync(status){
   var banner=document.getElementById('syncBanner');
   dot.className='sync-dot'+(status==='offline'?' off':(status==='syncing'?' syncing':''));
   txt.textContent=status==='synced'?'已同步':(status==='syncing'?'同步中':(status==='offline'?'离线':'本地'));
-  banner.className='sync-banner'+(status==='offline'&&hasSDK()?' show':'');
+  banner.className='sync-banner'+(status==='offline'&&(hasSDK()||ghEnabled())?' show':'');
 }
 
 function normalizeState(){
@@ -1535,7 +1638,7 @@ function delReward(id){state.rewards=state.rewards.filter(function(r){return r.i
 function askRedeem(id){var r=state.rewards.find(function(x){return x.id===id});if(!r)return;if(state.points<r.cost){toast("积分不足");return}document.getElementById("redeemInfo").textContent="兑换「"+r.name+"」将消耗 "+r.cost+" 分，当前余额 "+state.points+" 分。兑换后需家长审核生效。";document.getElementById("redeemModal").classList.add("show");window._redeemId=id}
 function confirmRedeem(){var id=window._redeemId;var r=state.rewards.find(function(x){return x.id===id});if(!r)return;state.points-=r.cost;state.redemptions.push({id:uid("rd_"),rewardId:r.id,rewardName:r.name,cost:r.cost,date:curDate,createdAt:Date.now(),status:"pending"});addPoints(0,"兑换:"+r.name+"(-"+r.cost+")");state.updatedAt=Date.now();saveState();closeModal("redeemModal");renderMall();renderTop();toast("已申请兑换，待家长审核")}
 
-function parentLogin(){var p=document.getElementById("parentPwd").value;if(p===state.parent.password){state.parent.authed=true;saveState();document.getElementById("parentLock").style.display="none";document.getElementById("parentPanel").style.display="block";renderParent();renderTop();toast("已进入家长模式")}else{toast("密码错误")}}
+function parentLogin(){var p=document.getElementById("parentPwd").value;if(p===state.parent.password){state.parent.authed=true;saveState();document.getElementById("parentLock").style.display="none";document.getElementById("parentPanel").style.display="block";renderParent();ghRenderStatus();renderTop();toast("已进入家长模式")}else{toast("密码错误")}}
 function parentLogout(){state.parent.authed=false;saveState();document.getElementById("parentPanel").style.display="none";document.getElementById("parentLock").style.display="block";document.getElementById("parentPwd").value="";renderTop();nav("tasks")}
 function renderParent(){
   if(!state.parent.authed)return;
