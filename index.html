@@ -177,6 +177,25 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .padd-title{flex:1;min-width:180px}
 .alert-item{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;background:#10131b}
 .plan-empty{text-align:center;padding:26px 14px;color:var(--text-3);font-size:13px}
+/* ===== 历史回看 ===== */
+.hist-monthnav{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.hist-month{font-size:17px;font-weight:800;letter-spacing:.5px;text-align:center;flex:1;color:var(--text)}
+.hist-week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}
+.hist-week span{text-align:center;font-size:11px;color:var(--text-3);font-weight:600}
+.hist-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.hist-cell{min-height:58px;border:1px solid var(--border);border-radius:8px;background:#10131b;padding:5px 6px;cursor:pointer;position:relative;transition:.15s;overflow:hidden}
+.hist-cell:hover{border-color:var(--accent)}
+.hist-cell.pad{border:none;background:transparent;cursor:default}
+.hist-cell.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(255,107,26,.35)}
+.hist-cell.today .hd{color:var(--accent)}
+.hist-cell .hd{font-size:12px;font-weight:700;color:var(--text-2);display:flex;justify-content:space-between;align-items:center}
+.hist-cell .hd .dd{font-size:9px;color:var(--text-3);font-weight:600}
+.hist-cell .mi{font-size:10px;color:var(--signal);font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+.hist-cell .tk{font-size:9px;color:var(--green);font-weight:700;margin-top:1px}
+.hist-cell .bar{position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent)}
+.hist-legend{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-3);justify-content:center;margin-top:10px}
+.hist-legend i{width:12px;height:12px;border-radius:3px;background:#10131b;border:1px solid var(--border);display:inline-block}
+@media(max-width:640px){.hist-cell{min-height:48px;padding:4px}.hist-cell .mi{font-size:9px}.hist-month{font-size:15px}}
 </style>
 </head>
 <body data-page-node-id="a5lGxOVgq8JrSYLpXyDbLB">
@@ -202,6 +221,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
     <div class="nav-item" data-page="plan" onclick="nav('plan')"><span class="ic">🎯</span>阶段目标</div>
     <div class="nav-item" data-page="wrong" onclick="nav('wrong')" data-page-node-id="bcB4PEyNXZ6DV5mxaOeC14"><span class="ic" data-page-node-id="AmCw78hhP5nXd1xtZQ7QwA">📝</span>错题难题库</div>
     <div class="nav-item" data-page="review" onclick="nav('review')" data-page-node-id="dKT85RSEbHnJJqrzzrEmeL"><span class="ic" data-page-node-id="wbsXtScKXFFHi2hTLhJAuZ">📈</span>复盘引擎</div>
+    <div class="nav-item" data-page="history" onclick="nav('history')"><span class="ic">📅</span>历史回看</div>
     <div class="nav-item" data-page="graph" onclick="nav('graph')" data-page-node-id="qB3BCiDWvlLanndpucX4JZ"><span class="ic" data-page-node-id="7PYK2ReMUXiLTEYwDFssiM">🕸️</span>知识图谱</div>
     <div class="nav-item" data-page="mall" onclick="nav('mall')" data-page-node-id="PZC4AME5h2OMcqbyskOopE"><span class="ic" data-page-node-id="Ahc5OO0FpaMVuj14rMldfL">🎁</span>激励商城</div>
     <div class="nav-item" data-page="parent" onclick="nav('parent')" data-page-node-id="7rqOnWTQ1pxOh5ZK3iWYYf"><span class="ic" data-page-node-id="Heso5iKgIgVA73lrgT7YmH">🔒</span>家长视图</div>
@@ -213,17 +233,20 @@ input,select,textarea{font-family:inherit;font-size:14px}
       <h1 class="page-title" data-page-node-id="KKahRPMqBNKccGdTawM8BK">任务中枢</h1>
       <p class="page-sub" data-page-node-id="6lU9Lq6DkFu7pRiRpDA7w2">把每日学习拆成可执行卡片，完成即打卡，自动累计积分</p>
       <div class="row" style="margin-bottom:16px" data-page-node-id="oGR9utpjiDrODgRQpD06sr">
-        <input class="input" id="datePick" type="date" style="max-width:180px" onchange="renderTasks()" data-page-node-id="EB6mD2zPFDuKtHxtylqGKZ">
+        <button class="btn ghost sm" onclick="taskDayShift(-1)">‹ 前一天</button>
+        <input class="input" id="datePick" type="date" style="max-width:170px" onchange="taskDateChange(this.value)" data-page-node-id="EB6mD2zPFDuKtHxtylqGKZ">
+        <button class="btn ghost sm" onclick="taskDayShift(1)">后一天 ›</button>
+        <button class="btn ghost sm" onclick="taskDateChange(curDate)">回到今天</button>
         <button class="btn" onclick="openTaskModal()" data-page-node-id="gpYFhlMzz85xMzFIYdMzFg">+ 添加任务</button>
         <button class="btn ghost sm" onclick="genDailyTemplate()" data-page-node-id="fGfe8a3YdEgfME1jGHiwRM">生成每日模板</button>
       </div>
       <div class="grid g3" data-page-node-id="dpWBCAXeBbbo0FRlR1jyqF">
-        <div class="card" data-page-node-id="mcYr7ULJHs2geAnhHFTkQW"><div class="card-h" data-page-node-id="VFc9hGNQ1Kg3U46zjFbA8j">今日完成</div><div class="metric" data-page-node-id="578u18AlaN7VNco7XjaSuN"><div class="v" id="taskDoneCnt" data-page-node-id="BcfJUOWZvEaLyegJ8mYGu7">0</div><div class="l" data-page-node-id="UBxZ0XeiFsaFES9FRms0KG">已完成任务</div></div></div>
-        <div class="card" data-page-node-id="CVgDccI0njqMhzIZnn3aFQ"><div class="card-h" data-page-node-id="9sb1QQmS8zN9CZOGU2rOV2">今日积分</div><div class="metric" data-page-node-id="cXF9cBeE2sqvnzmwuo2sCR"><div class="v" id="taskPtsToday" data-page-node-id="P5aDTzTeBzqsEYBZSzxL1M">0</div><div class="l" data-page-node-id="qEolDJ3TaoD4F8xJndCJIy">本日获得</div></div></div>
+        <div class="card" data-page-node-id="mcYr7ULJHs2geAnhHFTkQW"><div class="card-h" data-page-node-id="VFc9hGNQ1Kg3U46zjFbA8j">当日完成</div><div class="metric" data-page-node-id="578u18AlaN7VNco7XjaSuN"><div class="v" id="taskDoneCnt" data-page-node-id="BcfJUOWZvEaLyegJ8mYGu7">0</div><div class="l" data-page-node-id="UBxZ0XeiFsaFES9FRms0KG">已完成任务</div></div></div>
+        <div class="card" data-page-node-id="CVgDccI0njqMhzIZnn3aFQ"><div class="card-h" data-page-node-id="9sb1QQmS8zN9CZOGU2rOV2">当日积分</div><div class="metric" data-page-node-id="cXF9cBeE2sqvnzmwuo2sCR"><div class="v" id="taskPtsToday" data-page-node-id="P5aDTzTeBzqsEYBZSzxL1M">0</div><div class="l" data-page-node-id="qEolDJ3TaoD4F8xJndCJIy">本日获得</div></div></div>
         <div class="card" data-page-node-id="KD43GWLYye5vGrDRSbK0M2"><div class="card-h" data-page-node-id="yA2aoIfsdmSqgahkE229hH">连续打卡</div><div class="metric" data-page-node-id="F3eSD9EEXeiIuwyzeaZkeF"><div class="v" id="streak" data-page-node-id="EmiYFveqlfElexXNklYdch">0</div><div class="l" data-page-node-id="bX2gSgEGW5YiGdtRGBbqZ3">天</div></div></div>
       </div>
       <div class="card" data-page-node-id="MfnVhOriI1Q4n75WdFMSpR">
-        <div class="card-h" data-page-node-id="iOngBpEG4y7udtsLir8zza">今日任务清单 <span id="taskDateLabel" style="font-size:12px;color:var(--text-3);font-weight:400" data-page-node-id="O4kn5BVhsE3bBIgg7aMk0N"></span></div>
+        <div class="card-h" data-page-node-id="iOngBpEG4y7udtsLir8zza">任务清单 <span id="taskDateLabel" style="font-size:12px;color:var(--text-3);font-weight:400" data-page-node-id="O4kn5BVhsE3bBIgg7aMk0N"></span></div>
         <div id="taskList" data-page-node-id="JVqbNk6AarXmhMXNAYmbMM"></div>
       </div>
     </section>
@@ -390,6 +413,37 @@ input,select,textarea{font-family:inherit;font-size:14px}
           <div style="flex:1" data-page-node-id="WgUo1bC0OKAxflTySdo5GO"><label class="label" data-page-node-id="mAiWncDqjI3w0EfkocHIrg">每周学习目标(分钟)</label><input class="input" id="weekGoalInput" type="number" min="0" step="30" data-page-node-id="fCtTdW2RRqKARmnJRgY5Ty"></div>
           <button class="btn sm" style="align-self:flex-end" onclick="saveWeekGoal()" data-page-node-id="2Xf0JkwdS8P4Pa2MnWgepk">保存</button>
         </div>
+      </div>
+    </section>
+
+    <section class="page" id="page-history">
+      <h1 class="page-title">历史回看</h1>
+      <p class="page-sub">按月翻看每一天的学习档案 —— 任务、时长、积分、错题一屏汇总</p>
+
+      <div class="card">
+        <div class="hist-monthnav">
+          <button class="btn ghost sm" onclick="histShift(-1)">‹ 上月</button>
+          <div class="hist-month" id="histMonthLabel">—</div>
+          <button class="btn ghost sm" onclick="histShift(1)">下月 ›</button>
+        </div>
+        <div class="grid g4" style="margin:14px 0">
+          <div class="metric"><div class="v" id="histMonthMin">0</div><div class="l">本月时长(分)</div></div>
+          <div class="metric"><div class="v" id="histMonthTasks">0</div><div class="l">完成任务</div></div>
+          <div class="metric"><div class="v" id="histActiveDays">0</div><div class="l">学习天数</div></div>
+          <div class="metric"><div class="v" id="histMonthPts">0</div><div class="l">获得积分</div></div>
+        </div>
+        <div class="hist-week"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+        <div class="hist-grid" id="histCal"></div>
+        <div class="hist-legend"><i style="background:rgba(255,107,26,.10)"></i>学得少<i style="background:rgba(255,107,26,.24)"></i><i style="background:rgba(255,107,26,.38)"></i>学得多</div>
+        <div class="row" style="margin-top:12px;justify-content:center">
+          <button class="btn ghost sm" onclick="histToday()">回到今天</button>
+          <span style="font-size:11px;color:var(--text-3)">点击任意日期查看当天完整档案</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-h" id="histDayTitle">选择一天查看详情</div>
+        <div id="histDayDetail"><div class="empty">点击上方日历中的某一天</div></div>
       </div>
     </section>
 
@@ -564,6 +618,7 @@ var defaultState=function(){
 
 var state;
 var curDate=new Date().toISOString().slice(0,10);
+var VIEW_DATE=curDate; /* 任务中枢当前浏览的日期，可回看过去某天 */
 var dbState={online:false,recordId:null,syncing:false};
 
 function hasSDK(){return !!(window.__SMART_PAGE__&&window.__SMART_PAGE__.database)}
@@ -642,7 +697,7 @@ function ghApi(method,path,body){
   var cfg=ghCfg();
   return fetch('https://api.github.com'+path,{
     method:method,
-    headers:{'Authorization':'token '+cfg.token,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'},
+    headers:{'Authorization':(cfg.scheme||'Bearer')+' '+cfg.token,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'},
     body:body?JSON.stringify(body):undefined
   }).then(function(r){
     if(r.status===404)return null;
@@ -705,13 +760,27 @@ function ghRenderStatus(){
     el.textContent='未配置（当前仅本机存储）';el.style.color='var(--text-2)';
   }
 }
+/* 自动适配两种 Token 鉴权写法：细粒度 Token 用 Bearer，经典 Token 两种皆可 */
+function ghTryAuth(t){
+  var schemes=['Bearer','token'],i=0;
+  function next(){
+    if(i>=schemes.length)return Promise.reject(new Error('Token 无效/已过期，或未授权访问该仓库'));
+    var s=schemes[i++];
+    return fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO,{headers:{'Authorization':s+' '+t,'Accept':'application/vnd.github.v3+json'}})
+      .then(function(r){
+        if(r.ok)return s;
+        if(r.status===401||r.status===403||r.status===404)return next();
+        throw new Error('校验失败 '+r.status);
+      });
+  }
+  return next();
+}
 function ghSaveToken(){
   var v=document.getElementById('ghToken').value.trim();
   if(!v){toast('请输入 Token');return}
-  fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO,{headers:{'Authorization':'token '+v,'Accept':'application/vnd.github.v3+json'}})
-    .then(function(r){if(!r.ok)throw new Error(r.status===401?'Token 无效或已过期':'校验失败 '+r.status);return r.json()})
-    .then(function(){
-      localStorage.setItem(GH_SYNC_KEY,JSON.stringify({token:v,enabled:true}));
+  ghTryAuth(v)
+    .then(function(scheme){
+      localStorage.setItem(GH_SYNC_KEY,JSON.stringify({token:v,enabled:true,scheme:scheme}));
       ghState.sha=null;toast('Token 有效，云同步已启用');
       return ghPushNow();
     })
@@ -830,7 +899,7 @@ function nav(page){
   document.querySelectorAll(".nav-item").forEach(function(n){n.classList.remove("active")});
   var navEl=document.querySelector('.nav-item[data-page="'+page+'"]');
   if(navEl)navEl.classList.add("active");
-  var r={tasks:renderTasks,dashboard:renderDashboard,study:renderStudy,plan:renderPlan,wrong:renderWrong,review:renderReview,graph:renderGraph,mall:renderMall,parent:renderParent}[page];
+  var r={tasks:renderTasks,dashboard:renderDashboard,study:renderStudy,plan:renderPlan,wrong:renderWrong,review:renderReview,history:renderHistory,graph:renderGraph,mall:renderMall,parent:renderParent}[page];
   if(r)r();
 }
 
@@ -853,10 +922,17 @@ function renderNav(){
   if(addRwd)addRwd.style.display=state.parent.authed?'':'none';
 }
 
+function taskDateChange(v){VIEW_DATE=v||curDate;renderTasks()}
+function taskDayShift(n){
+  var d=new Date((VIEW_DATE||curDate)+"T00:00:00Z");
+  d.setUTCDate(d.getUTCDate()+n);
+  VIEW_DATE=d.toISOString().slice(0,10);
+  renderTasks();
+}
 function renderTasks(){
-  document.getElementById("datePick").value=curDate;
-  document.getElementById("taskDateLabel").textContent=curDate;
-  var list=(state.tasks||[]).filter(function(t){return t.date===curDate});
+  document.getElementById("datePick").value=VIEW_DATE;
+  document.getElementById("taskDateLabel").textContent=VIEW_DATE+(VIEW_DATE===curDate?" · 今天":" · 回看");
+  var list=(state.tasks||[]).filter(function(t){return t.date===VIEW_DATE});
   var done=list.filter(function(t){return t.done}).length;
   var pts=list.filter(function(t){return t.done}).reduce(function(s,t){return s+(t.points||0)},0);
   document.getElementById("taskDoneCnt").textContent=done+"/"+list.length;
@@ -864,7 +940,7 @@ function renderTasks(){
   calcStreak();
   document.getElementById("streak").textContent=state.streak;
   var box=document.getElementById("taskList");
-  if(!list.length){box.innerHTML='<div class="empty">今日暂无任务，点"添加任务"或"生成每日模板"</div>';return}
+  if(!list.length){box.innerHTML='<div class="empty">'+(VIEW_DATE===curDate?"今日":"该日")+'暂无任务，点「添加任务」或「生成每日模板」</div>';return}
   box.innerHTML=list.map(function(t){
     return '<div class="task-item '+(t.done?'done':'')+'">'+
       '<div class="check '+(t.done?'on':'')+'" onclick="toggleTask(\''+t.id+'\')">'+(t.done?'✓':'')+'</div>'+
@@ -907,7 +983,7 @@ function uiPrompt(title,msg,defVal,okCb){
   setTimeout(function(){try{el.focus();el.select()}catch(e){}},80);
 }
 function addTask(){
-  var t={id:uid("t_"),subject:document.getElementById("tSubj").value,title:document.getElementById("tTitle").value.trim(),type:document.getElementById("tType").value,points:parseInt(document.getElementById("tPts").value)||0,done:false,date:curDate,createdAt:Date.now()};
+  var t={id:uid("t_"),subject:document.getElementById("tSubj").value,title:document.getElementById("tTitle").value.trim(),type:document.getElementById("tType").value,points:parseInt(document.getElementById("tPts").value)||0,done:false,date:VIEW_DATE,createdAt:Date.now()};
   if(!t.title){toast("请填写任务内容");return}
   state.tasks.push(t);state.updatedAt=Date.now();saveState();closeModal("taskModal");
   document.getElementById("tTitle").value="";renderTasks();renderTop();toast("已添加任务");
@@ -934,11 +1010,11 @@ function genDailyTemplate(){
     {subject:"生物",title:"生物预习/复习",type:"预习",points:10}
   ];
   tpl.forEach(function(t){
-    if(!state.tasks.find(function(x){return x.date===curDate&&x.title===t.title})){
-      state.tasks.push(Object.assign({id:uid("t_"),done:false,date:curDate,createdAt:Date.now()},t));
+    if(!state.tasks.find(function(x){return x.date===VIEW_DATE&&x.title===t.title})){
+      state.tasks.push(Object.assign({id:uid("t_"),done:false,date:VIEW_DATE,createdAt:Date.now()},t));
     }
   });
-  state.updatedAt=Date.now();saveState();renderTasks();toast("已生成每日模板");
+  state.updatedAt=Date.now();saveState();renderTasks();toast("已生成 "+(VIEW_DATE===curDate?"今日":VIEW_DATE)+" 模板");
 }
 function calcStreak(){
   var s=0,d=new Date();
@@ -1311,6 +1387,131 @@ function renderSessionList(){
       '<button class="btn ghost sm" style="padding:3px 9px" onclick="delSession(\''+s.id+'\')">×</button>'+
       '</div>';
   }).join("");
+}
+
+/* ============ 历史回看模块 ============ */
+var HIST_Y=null,HIST_M=null,HIST_SEL=null;
+function histPad(n){return (n<10?"0":"")+n}
+function histDs(y,m,d){return y+"-"+histPad(m+1)+"-"+histPad(d)}
+function histInit(){
+  if(HIST_Y!==null)return;
+  var t=new Date();HIST_Y=t.getUTCFullYear();HIST_M=t.getUTCMonth();HIST_SEL=curDate;
+}
+function histShift(n){
+  histInit();HIST_M+=n;
+  if(HIST_M<0){HIST_M=11;HIST_Y--}else if(HIST_M>11){HIST_M=0;HIST_Y++}
+  renderHistory();
+}
+function histToday(){var t=new Date();HIST_Y=t.getUTCFullYear();HIST_M=t.getUTCMonth();HIST_SEL=curDate;renderHistory()}
+function histSelect(ds){HIST_SEL=ds;renderHistory()}
+function histDayPoints(ds){
+  var n=0;
+  (state.pointsLog||[]).forEach(function(l){
+    if(l.delta>0&&l.time){try{if(new Date(l.time).toISOString().slice(0,10)===ds)n+=l.delta}catch(e){}}
+  });
+  return n;
+}
+function histMonthStats(y,m){
+  var days=new Date(Date.UTC(y,m+1,0)).getUTCDate();
+  var min=0,done=0,pts=0,active=0;
+  for(var d=1;d<=days;d++){
+    var ds=histDs(y,m,d);
+    var mm=state.studyLogs[ds]||0;
+    min+=mm;if(mm>0)active++;
+    done+=(state.tasks||[]).filter(function(t){return t.date===ds&&t.done}).length;
+    pts+=histDayPoints(ds);
+  }
+  return {days:days,min:min,done:done,pts:pts,active:active};
+}
+function renderHistory(){histInit();renderHistSummary();renderHistCalendar();renderHistDay()}
+function renderHistSummary(){
+  var s=histMonthStats(HIST_Y,HIST_M);
+  document.getElementById("histMonthLabel").textContent=HIST_Y+"年"+(HIST_M+1)+"月";
+  document.getElementById("histMonthMin").textContent=s.min;
+  document.getElementById("histMonthTasks").textContent=s.done;
+  document.getElementById("histActiveDays").textContent=s.active;
+  document.getElementById("histMonthPts").textContent=s.pts;
+}
+function renderHistCalendar(){
+  var y=HIST_Y,m=HIST_M,st=histMonthStats(y,m);
+  var firstWd=new Date(Date.UTC(y,m,1)).getUTCDay();
+  var maxMin=60;
+  for(var d=1;d<=st.days;d++){var v=state.studyLogs[histDs(y,m,d)]||0;if(v>maxMin)maxMin=v}
+  var html="";
+  for(var i=0;i<firstWd;i++)html+='<div class="hist-cell pad"></div>';
+  for(var d2=1;d2<=st.days;d2++){
+    var ds=histDs(y,m,d2);
+    var mm=state.studyLogs[ds]||0;
+    var dn=(state.tasks||[]).filter(function(t){return t.date===ds&&t.done}).length;
+    var ratio=Math.min(1,mm/maxMin);
+    var cls="hist-cell"+(ds===curDate?" today":"")+(ds===HIST_SEL?" sel":"");
+    var style=mm>0?"background:rgba(255,107,26,"+(0.06+0.30*ratio).toFixed(2)+");":"";
+    var wd="日一二三四五六"[new Date(Date.UTC(y,m,d2)).getUTCDay()];
+    html+='<div class="'+cls+'" style="'+style+'" onclick="histSelect(\''+ds+'\')">'+
+      '<div class="hd">'+d2+'<span class="dd">'+wd+'</span></div>'+
+      (mm>0?'<div class="mi">'+mm+'分</div>':'')+
+      (dn>0?'<div class="tk">✓'+dn+'</div>':'')+
+      (mm>0?'<div class="bar" style="opacity:'+(0.35+0.65*ratio).toFixed(2)+'"></div>':'')+
+      '</div>';
+  }
+  document.getElementById("histCal").innerHTML=html;
+}
+function renderHistDay(){
+  var ds=HIST_SEL||curDate;
+  var dTasks=(state.tasks||[]).filter(function(t){return t.date===ds});
+  var dDone=dTasks.filter(function(t){return t.done});
+  var dSess=(state.studySessions||[]).filter(function(s){return s.date===ds});
+  var dMin=dSess.reduce(function(a,s){return a+s.minutes},0);
+  var dPts=dDone.reduce(function(a,t){return a+(t.points||0)},0);
+  var dWrong=(state.wrongQuestions||[]).filter(function(q){return q.date===ds});
+  var dRed=(state.redemptions||[]).filter(function(r){return r.date===ds});
+  var wd="日一二三四五六"[new Date(ds+"T00:00:00Z").getUTCDay()];
+  document.getElementById("histDayTitle").textContent=ds+" 周"+wd+(ds===curDate?" · 今天":"");
+  var box=document.getElementById("histDayDetail");
+  if(!dTasks.length&&!dSess.length&&!dWrong.length&&!dRed.length){box.innerHTML='<div class="empty">这一天没有学习记录</div>';return}
+  var html='<div class="grid g4" style="margin-bottom:14px">'+
+    '<div class="metric"><div class="v">'+dDone.length+'/'+dTasks.length+'</div><div class="l">任务完成</div></div>'+
+    '<div class="metric"><div class="v">'+dMin+'</div><div class="l">学习(分钟)</div></div>'+
+    '<div class="metric"><div class="v">'+dPts+'</div><div class="l">任务得分</div></div>'+
+    '<div class="metric"><div class="v">'+dWrong.length+'</div><div class="l">新增错题</div></div>'+
+  '</div>';
+  if(dTasks.length){
+    html+='<div style="font-size:13px;font-weight:700;margin:4px 0 8px">📋 任务清单</div>';
+    html+=dTasks.map(function(t){
+      return '<div class="task-item '+(t.done?'done':'')+'" style="cursor:default">'+
+        '<div class="check '+(t.done?'on':'')+'" style="cursor:default">'+(t.done?'✓':'')+'</div>'+
+        '<div class="task-title">'+esc(t.title)+'</div>'+
+        '<span class="tag '+(SUBJ_TAG[t.subject]||"")+'">'+esc(t.subject)+'</span>'+
+        '<span class="task-pts">+'+t.points+'</span></div>';
+    }).join("");
+  }
+  if(dSess.length){
+    html+='<div style="font-size:13px;font-weight:700;margin:14px 0 8px">⏱️ 学时明细</div>';
+    html+=dSess.map(function(s){
+      var hm=Math.floor(s.minutes/60),mm2=s.minutes%60;
+      return '<div class="sess-item">'+
+        '<div class="sess-time">'+(hm?hm+"h":"")+mm2+'m</div>'+
+        '<div class="sess-main"><div class="row" style="gap:6px">'+
+        '<span class="tag '+(SUBJ_TAG[s.subject]||"")+'">'+esc(s.subject)+'</span>'+
+        '<span style="font-size:11px;color:var(--text-3)">'+(s.mode==="timer"?"计时":"补录")+'</span>'+
+        '</div>'+(s.note?'<div class="sess-note">'+esc(s.note)+'</div>':'')+'</div></div>';
+    }).join("");
+  }
+  if(dWrong.length){
+    html+='<div style="font-size:13px;font-weight:700;margin:14px 0 8px">📝 新增错题</div>';
+    html+=dWrong.map(function(q){
+      return '<div class="qcard"><div class="qh"><span class="tag '+(SUBJ_TAG[q.subject]||"")+'">'+esc(q.subject)+'</span>'+
+        (q.kp?'<span style="font-size:11px;color:var(--text-3)">'+esc(q.kp)+'</span>':'')+'</div>'+
+        '<div class="qbody">'+esc(q.question)+'</div>'+(q.reason?'<div class="qbody">归因：'+esc(q.reason)+'</div>':'')+'</div>';
+    }).join("");
+  }
+  if(dRed.length){
+    html+='<div style="font-size:13px;font-weight:700;margin:14px 0 8px">🎁 积分兑换</div>';
+    html+=dRed.map(function(r){
+      return '<div class="reward-item"><div class="ri">🎁</div><div class="rn">'+esc(r.rewardName)+'</div><div class="rc">-'+r.cost+'</div></div>';
+    }).join("");
+  }
+  box.innerHTML=html;
 }
 
 /* ============ 阶段目标管控模块 ============ */
