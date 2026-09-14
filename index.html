@@ -249,6 +249,15 @@ input,select,textarea{font-family:inherit;font-size:14px}
         <div class="card-h" data-page-node-id="iOngBpEG4y7udtsLir8zza">任务清单 <span id="taskDateLabel" style="font-size:12px;color:var(--text-3);font-weight:400" data-page-node-id="O4kn5BVhsE3bBIgg7aMk0N"></span></div>
         <div id="taskList" data-page-node-id="JVqbNk6AarXmhMXNAYmbMM"></div>
       </div>
+      <div class="card" style="margin-top:16px">
+        <div class="card-h">数据安全</div>
+        <p style="font-size:12px;color:var(--text-2);margin-bottom:10px">导出一份完整备份（JSON 文件）保存到电脑或网盘。换设备、误清浏览器数据、同步出问题时，用它一键恢复，记录一条不丢。</p>
+        <div class="row" style="flex-wrap:wrap">
+          <button class="btn ghost sm" onclick="exportBackup()">💾 导出完整备份</button>
+          <button class="btn ghost sm" onclick="pickImport()">📥 导入恢复</button>
+          <span id="bkHintTop" style="font-size:12px;color:var(--text-3);align-self:center"></span>
+        </div>
+      </div>
     </section>
 
     <section class="page" id="page-dashboard" data-page-node-id="tr2OV0OaiM5QskumBKDUnF">
@@ -507,6 +516,16 @@ input,select,textarea{font-family:inherit;font-size:14px}
             <div class="row" style="margin-bottom:10px"><button class="btn sm" onclick="ghSaveToken()">保存并启用</button><button class="btn sm ghost" onclick="ghDisable()">停用</button></div>
             <p id="ghStatus" style="font-size:12px;margin-top:4px"></p>
           </div>
+          <div class="card" id="backupCard">
+            <div class="card-h">数据备份与恢复</div>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:10px">「导出完整备份」会把全部数据存成一个 JSON 文件（建议放网盘）。<b>换设备、误清浏览器数据、或同步异常时</b>，用「导入恢复」把它读回来。</p>
+            <div id="bkStats" style="font-size:12px;color:var(--text-2);margin-bottom:6px"></div>
+            <p id="bkStatus" style="font-size:12px;margin-bottom:10px"></p>
+            <div class="row" style="flex-wrap:wrap">
+              <button class="btn sm" onclick="exportBackup()">导出完整备份</button>
+              <button class="btn sm ghost" onclick="pickImport()">导入恢复</button>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -570,6 +589,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
   </div>
 </div>
 
+<input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="onImportFile(this)">
 <div class="toast" id="toast" data-page-node-id="mCr7uSPNKq3mfaNz7xX37d"></div>
 
 <div class="modal-mask" id="uiModal">
@@ -855,6 +875,91 @@ function mergeStates(local,cloud){
   result.parent=pickNewer(local.parent,cloud.parent)||defaultState().parent;
   result.updatedAt=Math.max(local.updatedAt||0,cloud.updatedAt||0);
   return result;
+}
+
+/* ============ 数据备份与恢复模块 ============ */
+var BK_KEY="cz2_last_backup",BK_SAFETY_KEY="cz2_safety_snapshot",BK_PENDING=null;
+function bkStatsOf(s){
+  return {
+    tasks:(s.tasks||[]).length,
+    sessions:(s.studySessions||[]).length,
+    wrong:(s.wrongQuestions||[]).length,
+    checkins:Object.keys(s.checkins||{}).length
+  };
+}
+function bkStatsText(s){return "任务 "+s.tasks+" 条 · 学时 "+s.sessions+" 条 · 错题 "+s.wrong+" 道 · 打卡 "+s.checkins+" 天"}
+function bkLast(){
+  try{var v=localStorage.getItem(BK_KEY);return v?parseInt(v,10):null}catch(e){return null}
+}
+function renderBackup(){
+  var st=document.getElementById("bkStats");
+  if(st)st.textContent="当前数据："+bkStatsText(bkStatsOf(state));
+  var last=bkLast();
+  var el=document.getElementById("bkStatus");
+  if(el){
+    if(last){el.textContent="上次导出备份："+new Date(last).toLocaleString("zh-CN");el.style.color="var(--text-2)"}
+    else{el.textContent="⚠️ 还没有导出过备份，建议现在导出一份存好";el.style.color="var(--amber)"}
+  }
+  var hint=document.getElementById("bkHintTop");
+  if(hint)hint.textContent=last?("上次备份："+new Date(last).toLocaleDateString("zh-CN")):"建议导出一次备份存好";
+}
+function exportBackup(){
+  var payload={app:"初二综合学习工作台",version:APP_VER,exportedAt:Date.now(),exportedAtText:new Date().toLocaleString("zh-CN"),state:state};
+  var blob=new Blob([JSON.stringify(payload)],{type:"application/json"});
+  var a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="初二学习台_备份_"+new Date().toISOString().slice(0,10)+".json";
+  document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);if(a.parentNode)a.parentNode.removeChild(a)},1000);
+  try{localStorage.setItem(BK_KEY,String(Date.now()))}catch(e){}
+  renderBackup();toast("备份文件已导出");
+}
+function pickImport(){document.getElementById("importFile").click()}
+function onImportFile(input){
+  var f=input.files&&input.files[0];
+  if(!f)return;
+  input.value="";
+  if(f.size>20*1024*1024){toast("文件过大，可能不是备份文件");return}
+  var reader=new FileReader();
+  reader.onerror=function(){toast("文件读取失败")};
+  reader.onload=function(){
+    var data=null;try{data=JSON.parse(reader.result)}catch(e){data=null}
+    var bk=data&&data.state?data.state:data;
+    if(!bk||typeof bk!=="object"||Array.isArray(bk)||!(bk.tasks||bk.studySessions||bk.wrongQuestions||bk.studyLogs||typeof bk.points==="number")){
+      toast("这不是本工作台的备份文件");return;
+    }
+    BK_PENDING=bk;
+    openUiModal("导入恢复",
+      '<div style="font-size:13px">备份时间：'+(data&&data.exportedAtText?esc(data.exportedAtText):"未知")+'<br>备份内容：'+bkStatsText(bkStatsOf(bk))+'</div>'+
+      '<div style="margin-top:10px;font-size:13px;color:var(--text-2)">点「合并恢复」= 保留当前数据，把备份里缺的记录补回来（推荐）。若要用备份完全替换当前数据，点下面的覆盖恢复。</div>'+
+      '<div style="margin-top:12px"><button class="btn ghost sm" style="color:var(--red);border-color:rgba(255,77,94,.4)" onclick="applyImport(\'replace\')">覆盖恢复（清空现有数据）</button></div>',
+      "合并恢复",false,function(){applyImport("merge")});
+  };
+  reader.readAsText(f);
+}
+function applyImport(mode){
+  var bk=BK_PENDING;if(!bk)return;
+  if(mode==="replace"){
+    closeUiModal();
+    setTimeout(function(){
+      uiConfirm("⚠️ 覆盖恢复会用备份文件<b>完全替换</b>当前全部数据，现有记录将被清空，且不可撤销。<br>确定继续吗？",function(){doApplyImport(bk,"replace")});
+    },150);
+    return;
+  }
+  doApplyImport(bk,"merge");
+}
+function doApplyImport(bk,mode){
+  try{localStorage.setItem(BK_SAFETY_KEY,JSON.stringify({at:Date.now(),state:state}))}catch(e){}
+  state=(mode==="replace")?bk:mergeStates(state,bk);
+  normalizeState();
+  if(!state.parent)state.parent=defaultState().parent;
+  state.parent.authed=true;
+  state.updatedAt=Date.now();
+  BK_PENDING=null;
+  saveState();
+  closeUiModal();
+  renderTop();nav("parent");
+  toast(mode==="replace"?"已用备份覆盖恢复":"已合并恢复，原有数据未丢");
 }
 
 function setSync(status){
@@ -1893,6 +1998,7 @@ function renderParent(){
   document.getElementById("pTotalWQ").textContent=state.wrongQuestions.length;
   document.getElementById("pStreak").textContent=state.streak;
   document.getElementById("freezeTh").value=state.parent.freezeThreshold||200;
+  renderBackup();
   var pend=state.redemptions.filter(function(r){return r.status==="pending"});
   document.getElementById("pendCnt").textContent=pend.length?"待审"+pend.length:"";
   var box=document.getElementById("approveList");
@@ -1905,7 +2011,7 @@ function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id
 function changePwd(){var np=document.getElementById("newPwd").value;if(np.length<4){toast("密码至少4位");return}state.parent.password=np;state.updatedAt=Date.now();saveState();document.getElementById("newPwd").value="";toast("密码已修改")}
 
 loadState().then(function(){
-  renderTop();renderTasks();
+  renderTop();renderTasks();renderBackup();
   var mnDate=document.getElementById("mnDate");
   if(mnDate&&!mnDate.value)mnDate.value=curDate;
   var plDateEl=document.getElementById("plDate");
