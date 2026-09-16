@@ -611,6 +611,7 @@ var SUBJ_TAG={语文:"yu",数学:"shu",英语:"ying",物理:"wu",政治:"zheng",
 var DATABASE_ID="pnCUnO09ylRJpdKiRfHP8A";
 var STATE_KEY="cz2_state";
 var GH_SYNC_KEY="cz2_gh_sync";
+var PARENT_AUTH_KEY="cz2_parent_authed";
 var GH_OWNER="tiger76-19",GH_REPO="cz2-learning-station",GH_PATH="data/state.json";
 var ghState={syncing:false,sha:null,debounce:null,lastErr:"",failCount:0,lastOk:0,syncStart:0,retryTimer:null,retryDelay:5000,bannerTimer:null,tokenBad:false,probing:false};
 
@@ -631,6 +632,7 @@ var defaultState=function(){
     studySessions:[],
     timer:null,
     phases:[],
+    deleted:{},
     parent:{password:"1234",authed:false,freezeThreshold:200},
     settings:{theme:"light",sound:true}
   };
@@ -648,6 +650,16 @@ function fmt(d){return d.toISOString().slice(0,10)}
 
 function loadState(){
   return new Promise(function(resolve){
+    // 统一出口：恢复本标签页的家长登录态，然后 resolve
+    var finish=function(){
+      normalizeState();
+      try{
+        if(!state.parent)state.parent=defaultState().parent;
+        state.parent.authed=false;   // 一律先清零：本地/云端数据被篡改也不能越权
+        if(sessionStorage.getItem(PARENT_AUTH_KEY)==="1")state.parent.authed=true;
+      }catch(e){}
+      resolve();
+    };
     var local=readLocal();
     if(!hasSDK()){
       state=local||defaultState();normalizeState();
@@ -658,13 +670,13 @@ function loadState(){
           else if(cloud){state=cloud;}
           normalizeState();
           state.updatedAt=Date.now();
-          try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
+          try{localStorage.setItem(STATE_KEY,JSON.stringify(stripAuth(state)))}catch(e){}
           ghMarkOk();
         }).catch(function(e){ghMarkFail((e&&e.message)||String(e))})
-        .then(function(){resolve()});
+        .then(function(){finish()});
         return;
       }
-      setSync('offline');resolve();return;
+      setSync('offline');finish();return;
     }
     setSync('syncing');
     var db=window.__SMART_PAGE__.database;
@@ -681,10 +693,10 @@ function loadState(){
         normalizeState();
         state.updatedAt=Date.now();
         saveState();
-        dbState.online=true;setSync('synced');resolve();
+        dbState.online=true;setSync('synced');finish();
       })
       .catch(function(){
-        dbState.online=false;state=readLocal()||defaultState();normalizeState();setSync('offline');resolve();
+        dbState.online=false;state=readLocal()||defaultState();normalizeState();setSync('offline');finish();
       });
   });
 }
@@ -692,9 +704,22 @@ function loadState(){
 function readLocal(){
   try{var s=localStorage.getItem(STATE_KEY);return s?JSON.parse(s):null}catch(e){return null}
 }
+// 家长登录态：只存本标签页 sessionStorage，绝不落 localStorage、绝不上云，
+// 否则孩子端一打开就会自动进入家长模式（可改密码/审批兑换/删数据）
+function stripAuth(s){
+  try{var c=JSON.parse(JSON.stringify(s));if(c&&c.parent)c.parent.authed=false;return c}catch(e){return s}
+}
+function saveParentAuth(){
+  try{
+    if(state&&state.parent&&state.parent.authed)sessionStorage.setItem(PARENT_AUTH_KEY,"1");
+    else sessionStorage.removeItem(PARENT_AUTH_KEY);
+  }catch(e){}
+}
 function saveState(){
-  try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
-  if(hasSDK()&&dbState.online)pushToCloud(state);
+  saveParentAuth();
+  try{localStorage.setItem(STATE_KEY,JSON.stringify(stripAuth(state)))}catch(e){}
+  var payload=stripAuth(state);
+  if(hasSDK()&&dbState.online)pushToCloud(payload);
   else if(!hasSDK()&&ghEnabled()){state._dirty=true;pushToGitHub()}
 }
 function pushToCloud(s){
@@ -793,9 +818,13 @@ function ghPushNow(){
   ghState.syncing=true;ghState.syncStart=Date.now();setSync('syncing');
   var attempt=function(n){
     return ghPull().then(function(cloud){
-      if(cloud&&cloud.updatedAt>(state.updatedAt||0)+1000){state=mergeStates(state,cloud);normalizeState();}
+      if(cloud&&cloud.updatedAt>(state.updatedAt||0)+1000){
+        var wasAuthed=!!(state.parent&&state.parent.authed);
+        state=mergeStates(state,cloud);normalizeState();
+        if(wasAuthed){if(!state.parent)state.parent=defaultState().parent;state.parent.authed=true}
+      }
       state.updatedAt=Date.now();
-      var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(state))};
+      var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(stripAuth(state)))};
       if(ghState.sha)body.sha=ghState.sha;
       return ghApi('PUT','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH,body);
     }).then(function(res){
@@ -881,8 +910,11 @@ function ghRecover(silent){
     var cloudNewer=cloud&&cloud.updatedAt>(state.updatedAt||0)+500;
     if(cloudNewer&&!document.hidden){
       var local=state;
+      var wasAuthed=!!(state.parent&&state.parent.authed);
       state=mergeStates(local,cloud);normalizeState();
-      try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
+      // mergeStates 会清掉登录态（防越权），这里把当前标签页的登录态还原，避免后台心跳把家长踢出家长视图
+      if(wasAuthed){if(!state.parent)state.parent=defaultState().parent;state.parent.authed=true}
+      try{localStorage.setItem(STATE_KEY,JSON.stringify(stripAuth(state)))}catch(e){}
       renderTop();
       var act=document.querySelector('.nav-item.active');
       var pg=act&&act.getAttribute('data-page');
@@ -919,13 +951,26 @@ function mergeStates(local,cloud){
     var ids=Object.keys(lm);Object.keys(cm).forEach(function(id){if(!lm[id])ids.push(id)});
     return ids.map(function(id){return pickNewer(lm[id],cm[id])}).filter(Boolean);
   };
-  result.tasks=mergeById(local.tasks,cloud.tasks);
-  result.rewards=mergeById(local.rewards,cloud.rewards);
-  result.wrongQuestions=mergeById(local.wrongQuestions,cloud.wrongQuestions);
+  // 墓碑并集（任一端的删除都要生效，取较新时间戳）
+  result.deleted=Object.assign({},cloud.deleted||{},local.deleted||{});
+  var DELETED=result.deleted;
+  var alive=function(x){return x&&x.id&&!DELETED[x.id]};
+  var mergeAliveById=function(la,ca){
+    var lm=mt(la),cm=mt(ca);
+    var ids=Object.keys(lm);Object.keys(cm).forEach(function(id){if(!lm[id])ids.push(id)});
+    return ids.map(function(id){return pickNewer(lm[id],cm[id])}).filter(alive);
+  };
+  result.tasks=mergeAliveById(local.tasks,cloud.tasks);
+  result.rewards=mergeAliveById(local.rewards,cloud.rewards);
+  result.wrongQuestions=mergeAliveById(local.wrongQuestions,cloud.wrongQuestions);
   result.redemptions=mergeById(local.redemptions,cloud.redemptions);
-  result.studySessions=mergeById(local.studySessions,cloud.studySessions);
+  result.studySessions=mergeAliveById(local.studySessions,cloud.studySessions);
   result.timer=pickNewer(local.timer,cloud.timer)||null;
-  result.phases=mergeById(local.phases,cloud.phases);
+  result.phases=mergeAliveById(local.phases,cloud.phases).map(function(p){
+    if(!p||!p.items)return p;
+    p.items=p.items.filter(function(it){return it&&it.id&&!DELETED[it.id]});
+    return p;
+  });
   var unionByKey=function(la,ca,key){
     var seen={};
     return (la||[]).concat(ca||[]).filter(function(x){if(!x)return false;var k=x[key];if(seen[k])return false;seen[k]=1;return true});
@@ -940,6 +985,7 @@ function mergeStates(local,cloud){
   });
   result.badges=unionByKey(local.badges,cloud.badges,'id');
   result.parent=pickNewer(local.parent,cloud.parent)||defaultState().parent;
+  if(result.parent)result.parent.authed=false;   // 登录态不随云同步传播
   result.updatedAt=Math.max(local.updatedAt||0,cloud.updatedAt||0);
   return result;
 }
@@ -1016,7 +1062,7 @@ function applyImport(mode){
   doApplyImport(bk,"merge");
 }
 function doApplyImport(bk,mode){
-  try{localStorage.setItem(BK_SAFETY_KEY,JSON.stringify({at:Date.now(),state:state}))}catch(e){}
+  try{localStorage.setItem(BK_SAFETY_KEY,JSON.stringify({at:Date.now(),state:stripAuth(state)}))}catch(e){}
   state=(mode==="replace")?bk:mergeStates(state,bk);
   normalizeState();
   if(!state.parent)state.parent=defaultState().parent;
@@ -1077,6 +1123,18 @@ function normalizeState(){
   if(!state.studyLogs)state.studyLogs={};
   if(!state.timer)state.timer=null;
   if(!state.phases)state.phases=[];
+  if(!state.deleted)state.deleted={};
+  cleanTombstones();
+  // 兜底：本地若残留已被标记删除的记录（如中断的合并），一并清掉
+  if(state.tasks)state.tasks=dropDeleted(state.tasks);
+  if(state.wrongQuestions)state.wrongQuestions=dropDeleted(state.wrongQuestions);
+  if(state.studySessions)state.studySessions=dropDeleted(state.studySessions);
+  if(state.phases){
+    state.phases=dropDeleted(state.phases).map(function(p){
+      if(p&&p.items)p.items=p.items.filter(function(it){return it&&it.id&&!isDeleted(it.id)});
+      return p;
+    });
+  }
 }
 
 function toast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},1800)}
@@ -1136,7 +1194,7 @@ function renderTasks(){
   box.innerHTML=list.map(function(t){
     return '<div class="task-item '+(t.done?'done':'')+'">'+
       '<div class="check '+(t.done?'on':'')+'" onclick="toggleTask(\''+t.id+'\')">'+(t.done?'✓':'')+'</div>'+
-      '<div class="task-title">'+t.title+'</div>'+
+      '<div class="task-title">'+esc(t.title)+'</div>'+
       '<span class="tag '+SUBJ_TAG[t.subject]+'">'+t.subject+'</span>'+
       '<span class="tag" style="background:var(--surface-2);color:var(--text-2)">'+t.type+'</span>'+
       '<span class="task-pts">+'+t.points+'</span>'+
@@ -1147,6 +1205,17 @@ function renderTasks(){
 function openTaskModal(){document.getElementById("taskModal").classList.add("show")}
 function closeModal(id){document.getElementById(id).classList.remove("show")}
 function esc(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;")}
+// 错题图片只信任 data:image/ 内联图，防止备份文件里塞入 javascript: 等危险地址
+function safeImg(s){return /^data:image\//i.test(String(s||""))?s:""}
+// 删除墓碑：让「删除」能跨端生效（否则一端删了，另一端同步后又复活）
+function markDeleted(id){if(!id)return;if(!state.deleted)state.deleted={};state.deleted[id]=Date.now()}
+function isDeleted(id){return !!(state.deleted&&state.deleted[id])}
+function cleanTombstones(){
+  if(!state.deleted)state.deleted={};
+  var cut=Date.now()-90*864e5;   // 墓碑保留 90 天
+  Object.keys(state.deleted).forEach(function(k){if(state.deleted[k]<cut)delete state.deleted[k]});
+}
+function dropDeleted(arr){return (arr||[]).filter(function(x){return x&&!isDeleted(x.id)})}
 var UI_OK_CB=null;
 function openUiModal(title,bodyHtml,okLabel,isDanger,okCb){
   document.getElementById("uiTitle").textContent=title;
@@ -1185,10 +1254,16 @@ function toggleTask(id){
   t.done=!t.done;
   if(t.done){addPoints(t.points,"完成任务:"+t.title);checkBadges()}
   else{addPoints(-t.points,"取消完成:"+t.title)}
-  state.checkins[curDate]=state.checkins[curDate]||{};
+  // 打卡须记在任务所属日期（回看历史并补勾时，不能误记到今天）
+  var td=t.date||curDate;
+  if(t.done){state.checkins[td]=state.checkins[td]||{}}
+  else{
+    var still=(state.tasks||[]).some(function(x){return x.date===td&&x.done});
+    if(!still&&state.checkins[td])delete state.checkins[td];
+  }
   state.updatedAt=Date.now();saveState();renderTasks();renderTop();
 }
-function delTask(id){state.tasks=state.tasks.filter(function(t){return t.id!==id});state.updatedAt=Date.now();saveState();renderTasks();toast("已删除")}
+function delTask(id){markDeleted(id);state.tasks=state.tasks.filter(function(t){return t.id!==id});state.updatedAt=Date.now();saveState();renderTasks();toast("已删除")}
 function genDailyTemplate(){
   var tpl=[
     {subject:"语文",title:"课外阅读30分钟",type:"阅读",points:10},
@@ -1256,7 +1331,8 @@ function renderWeak(){
   SUBJECTS.forEach(function(s){(state.subjects[s].weak||[]).forEach(function(w){all.push({subject:s,name:w.name||w})})});
   if(!all.length){box.innerHTML='<div class="empty">暂无薄弱标记，点"标记薄弱"添加</div>';return}
   box.innerHTML=all.map(function(w){
-    return '<div class="qcard"><div class="qh"><span class="tag '+SUBJ_TAG[w.subject]+'">'+w.subject+'</span><button class="btn ghost sm" style="padding:2px 8px" onclick="delWeak(\''+w.subject+'\',\''+w.name.replace(/'/g,"")+'\')">×</button></div><div style="font-size:13px">'+w.name+'</div></div>';
+    // 知识点名可能含引号/尖括号：用 data-* 传值，避免破坏 onclick 的 JS 字符串
+    return '<div class="qcard"><div class="qh"><span class="tag '+SUBJ_TAG[w.subject]+'">'+esc(w.subject)+'</span><button class="btn ghost sm" style="padding:2px 8px" data-name="'+esc(w.name)+'" onclick="delWeak(\''+w.subject+'\',this.getAttribute(\'data-name\'))">×</button></div><div style="font-size:13px">'+esc(w.name)+'</div></div>';
   }).join("");
 }
 function openWeakModal(){document.getElementById("weakModal").classList.add("show")}
@@ -1283,10 +1359,10 @@ function renderWrong(){
   box.innerHTML=list.map(function(q){
     var revBtn=q.reviewed?'<span class="tag" style="background:var(--green-soft);color:var(--green)">已复习</span>':'<button class="btn sm ghost" onclick="markReview(\''+q.id+'\')">标记复习</button>';
     return '<div class="qcard"><div class="qh"><span class="tag '+SUBJ_TAG[q.subject]+'">'+q.subject+'</span><span style="font-size:11px;color:var(--text-3)">'+q.date+'</span><div style="margin-left:auto;display:flex;gap:6px">'+revBtn+'<button class="btn ghost sm" style="padding:3px 8px" onclick="delWrong(\''+q.id+'\')">×</button></div></div>'+
-      (q.image?'<img class="qimg" src="'+q.image+'" onclick="previewImg(this.src)">':'')+
-      '<div class="qbody"><b>题:</b> '+q.question+'</div>'+
-      (q.answer?'<div class="qbody"><b>答:</b> '+q.answer+'</div>':'')+
-      (q.reason?'<div class="qbody"><b>因:</b> '+q.reason+'</div>':'')+
+      (safeImg(q.image)?'<img class="qimg" src="'+esc(q.image)+'" onclick="previewImg(this.src)">':'')+
+      '<div class="qbody"><b>题:</b> '+esc(q.question)+'</div>'+
+      (q.answer?'<div class="qbody"><b>答:</b> '+esc(q.answer)+'</div>':'')+
+      (q.reason?'<div class="qbody"><b>因:</b> '+esc(q.reason)+'</div>':'')+
       (q.aiAnalysis?q.aiAnalysis:'')+
       '</div>';
   }).join("");
@@ -1326,7 +1402,7 @@ function addWrong(){
   resetImgPick();renderWrong();renderDashboard();addPoints(5,"录入错题");renderTop();toast("已录入并AI分析");
 }
 function markReview(id){var q=state.wrongQuestions.find(function(x){return x.id===id});if(q){q.reviewed=true;state.updatedAt=Date.now();saveState();renderWrong();addPoints(8,"复习错题");renderTop();toast("已标记复习+8分")}}
-function delWrong(id){state.wrongQuestions=state.wrongQuestions.filter(function(q){return q.id!==id});state.updatedAt=Date.now();saveState();renderWrong();toast("已删除")}
+function delWrong(id){markDeleted(id);state.wrongQuestions=state.wrongQuestions.filter(function(q){return q.id!==id});state.updatedAt=Date.now();saveState();renderWrong();toast("已删除")}
 function exportWrong(){
   var f=document.getElementById("wrongFilter").value;
   var list=state.wrongQuestions.filter(function(q){return !f||q.subject===f});
@@ -1498,6 +1574,7 @@ function addManualSession(){
 function delSession(id){
   var s=state.studySessions.find(function(x){return x.id===id});
   if(!s)return;
+  markDeleted(id);
   state.studySessions=state.studySessions.filter(function(x){return x.id!==id});
   state.studyLogs[s.date]=Math.max(0,(state.studyLogs[s.date]||0)-s.minutes);
   if(!state.studyLogs[s.date])delete state.studyLogs[s.date];
@@ -1575,7 +1652,7 @@ function renderSessionList(){
       '<div class="sess-main"><div class="row" style="gap:6px">'+
       '<span class="tag '+tagCls+'">'+s.subject+'</span>'+
       '<span style="font-size:11px;color:var(--text-3)">'+s.date+(s.mode==="timer"?" · 计时":" · 补录")+'</span>'+
-      '</div>'+(s.note?'<div class="sess-note">'+s.note+'</div>':'')+'</div>'+
+      '</div>'+(s.note?'<div class="sess-note">'+esc(s.note)+'</div>':'')+'</div>'+
       '<button class="btn ghost sm" style="padding:3px 9px" onclick="delSession(\''+s.id+'\')">×</button>'+
       '</div>';
   }).join("");
@@ -1754,6 +1831,8 @@ function delPhase(id){
   var ph=state.phases.find(function(x){return x.id===id});if(!ph)return;
   var cnt=(ph.items||[]).length;
   uiConfirm('确定删除阶段「<b style="color:var(--red)">'+esc(ph.name)+'</b>」吗？<br>将一并删除其中 '+cnt+' 条计划任务，<b>不可恢复</b>。',function(){
+    markDeleted(id);
+    (ph.items||[]).forEach(function(it){markDeleted(it.id)});
     state.phases=state.phases.filter(function(x){return x.id!==id});
     delete PLAN_OPEN[id];
     state.updatedAt=Date.now();saveState();renderPlan();toast("已删除阶段");
@@ -1789,6 +1868,7 @@ function togglePlanItem(pid,iid){
 }
 function delPlanItem(pid,iid){
   var ph=state.phases.find(function(x){return x.id===pid});if(!ph)return;
+  markDeleted(iid);
   ph.items=ph.items.filter(function(x){return x.id!==iid});
   ph.updatedAt=Date.now();state.updatedAt=Date.now();saveState();renderPlan();toast("已删除该任务");
 }
@@ -1823,8 +1903,8 @@ function renderPlanAlert(){
     var dl=o.it.due===curDate?'<span class="due-today">今天截止</span>':'<span class="due-over">逾期 '+(-dayDiff(o.it.due))+' 天</span>';
     return '<div class="alert-item">'+
       '<div class="check" onclick="togglePlanItem(\''+o.p.id+'\',\''+o.it.id+'\')"></div>'+
-      '<div class="pt-main"><div class="pt-title">'+o.it.title+'</div>'+
-      '<div style="font-size:11px;color:var(--text-3);margin-top:2px"><span class="tag '+tagCls+'">'+o.it.subj+'</span> · '+o.p.name+' · '+dl+'</div></div>'+
+      '<div class="pt-main"><div class="pt-title">'+esc(o.it.title)+'</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:2px"><span class="tag '+tagCls+'">'+esc(o.it.subj)+'</span> · '+esc(o.p.name)+' · '+dl+'</div></div>'+
       '<button class="btn ghost sm" style="padding:3px 9px" onclick="delPlanItem(\''+o.p.id+'\',\''+o.it.id+'\')">×</button></div>';
   }).join("");
 }
@@ -1873,7 +1953,7 @@ function planCard(p){
     rows+=arr.map(function(it){
       return '<div class="pitem '+(it.done?'done':'')+'">'+
         '<div class="check '+(it.done?'on':'')+'" onclick="togglePlanItem(\''+p.id+'\',\''+it.id+'\')">'+(it.done?'✓':'')+'</div>'+
-        '<div class="pt-main"><div class="pt-title">'+it.title+'</div>'+(it.due?'<div class="pt-meta">'+dueLabel(it)+'</div>':'')+'</div>'+
+        '<div class="pt-main"><div class="pt-title">'+esc(it.title)+'</div>'+(it.due?'<div class="pt-meta">'+dueLabel(it)+'</div>':'')+'</div>'+
         '<button class="btn ghost sm" style="padding:3px 9px" onclick="delPlanItem(\''+p.id+'\',\''+it.id+'\')">×</button></div>';
     }).join("");
   });
@@ -1884,7 +1964,7 @@ function planCard(p){
   return '<div class="card plan-card" style="border-left-color:'+acc+'">'+
     '<div class="plan-head">'+
       '<div class="plan-toggle" onclick="expandPlan(\''+p.id+'\')">'+
-        '<div><div class="plan-name" style="color:'+acc+'">'+p.name+'</div>'+
+        '<div><div class="plan-name" style="color:'+acc+'">'+esc(p.name)+'</div>'+
         '<div class="plan-sub">考试 '+(p.examDate||"—")+'　'+badge+'　'+overTip+'</div></div>'+
         '<div style="margin-left:auto;text-align:right;min-width:70px">'+
           '<div style="font-size:20px;font-weight:800;color:'+pctColor+'">'+pct+'%</div>'+
@@ -2017,10 +2097,15 @@ var GRAPH_EDGES={
 };
 function renderGraph(){
   var subj=document.getElementById("graphSubj").value;
+  if(!subj||!state.subjects||!state.subjects[subj]){
+    subj=(SUBJECTS.filter(function(s){return state.subjects&&state.subjects[s]})[0])||SUBJECTS[0];
+    var gs=document.getElementById("graphSubj");if(gs)gs.value=subj;
+  }
+  var sd=(state.subjects&&state.subjects[subj])||{progress:0,weak:[]};
   var nodes=GRAPH_DATA[subj]||[];
   var edges=GRAPH_EDGES[subj]||[];
-  var weak=(state.subjects[subj].weak||[]).map(function(w){return(w.name||w)});
-  var prog=state.subjects[subj].progress||0;
+  var weak=(sd.weak||[]).map(function(w){return(w.name||w)});
+  var prog=sd.progress||0;
   var html='<svg viewBox="0 0 680 380" width="100%" style="max-width:680px">';
   edges.forEach(function(e){var a=nodes[e[0]],b=nodes[e[1]];if(a&&b)html+='<line x1="'+a.x+'" y1="'+a.y+'" x2="'+b.x+'" y2="'+b.y+'" stroke="rgba(255,255,255,.12)" stroke-width="1"/>'});
   nodes.forEach(function(nd,i){
@@ -2045,13 +2130,13 @@ function showNode(subj,id){
   document.getElementById("nodeDetail").style.display="block";
   document.getElementById("nodeDetailBody").innerHTML='<div style="margin-bottom:8px"><b>'+nd.name+'</b> <span class="tag '+SUBJ_TAG[subj]+'">'+subj+'</span></div>'+
     '<div style="font-size:13px;color:var(--text-2);margin-bottom:8px">关联错题 '+rel.length+' 题</div>'+
-    (rel.length?rel.map(function(q){return '<div class="qcard"><div class="qbody">'+q.question+'</div>'+(q.aiAnalysis?q.aiAnalysis:'')+'</div>'}).join(""):'<div class="empty">暂无关联错题</div>');
+    (rel.length?rel.map(function(q){return '<div class="qcard"><div class="qbody">'+esc(q.question)+'</div>'+(q.aiAnalysis?q.aiAnalysis:'')+'</div>'}).join(""):'<div class="empty">暂无关联错题</div>');
 }
 
 function renderMall(){
   var box=document.getElementById("rewardList");
   box.innerHTML=(state.rewards||[]).map(function(r){
-    return '<div class="reward-item"><span class="ri">'+r.icon+'</span><div class="rn"><div style="font-weight:500">'+r.name+'</div><div class="task-meta">需 '+r.cost+' 分</div></div><button class="btn sm" '+(state.points>=r.cost?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="askRedeem(\''+r.id+'\')">兑换</button><button class="btn ghost sm" style="padding:3px 8px" onclick="delReward(\''+r.id+'\')">×</button></div>';
+    return '<div class="reward-item"><span class="ri">'+esc(r.icon)+'</span><div class="rn"><div style="font-weight:500">'+esc(r.name)+'</div><div class="task-meta">需 '+r.cost+' 分</div></div><button class="btn sm" '+(state.points>=r.cost?'':'disabled style="opacity:.5;cursor:not-allowed"')+' onclick="askRedeem(\''+r.id+'\')">兑换</button><button class="btn ghost sm" style="padding:3px 8px" onclick="delReward(\''+r.id+'\')">×</button></div>';
   }).join("");
   var badges=[
     {id:"b1",name:"初学乍练",icon:"🌱",cond:"完成首个任务",got:state.tasks.some(function(t){return t.done})},
@@ -2072,9 +2157,11 @@ function renderMall(){
 function checkBadges(){renderMall()}
 function openRewardModal(){document.getElementById("rewardModal").classList.add("show")}
 function addReward(){var r={id:uid("r_"),name:document.getElementById("rName").value.trim(),cost:parseInt(document.getElementById("rCost").value)||0,icon:document.getElementById("rIcon").value.trim()||"🎁"};if(!r.name){toast("请填奖励名");return}state.rewards.push(r);state.updatedAt=Date.now();saveState();closeModal("rewardModal");document.getElementById("rName").value="";document.getElementById("rCost").value=100;renderMall();toast("已添加奖励")}
-function delReward(id){state.rewards=state.rewards.filter(function(r){return r.id!==id});state.updatedAt=Date.now();saveState();renderMall()}
+function delReward(id){markDeleted(id);state.rewards=state.rewards.filter(function(r){return r.id!==id});state.updatedAt=Date.now();saveState();renderMall()}
 function askRedeem(id){var r=state.rewards.find(function(x){return x.id===id});if(!r)return;if(state.points<r.cost){toast("积分不足");return}document.getElementById("redeemInfo").textContent="兑换「"+r.name+"」将消耗 "+r.cost+" 分，当前余额 "+state.points+" 分。兑换后需家长审核生效。";document.getElementById("redeemModal").classList.add("show");window._redeemId=id}
-function confirmRedeem(){var id=window._redeemId;var r=state.rewards.find(function(x){return x.id===id});if(!r)return;state.points-=r.cost;state.redemptions.push({id:uid("rd_"),rewardId:r.id,rewardName:r.name,cost:r.cost,date:curDate,createdAt:Date.now(),status:"pending"});addPoints(0,"兑换:"+r.name+"(-"+r.cost+")");state.updatedAt=Date.now();saveState();closeModal("redeemModal");renderMall();renderTop();toast("已申请兑换，待家长审核")}
+function confirmRedeem(){var id=window._redeemId;var r=state.rewards.find(function(x){return x.id===id});if(!r){closeModal("redeemModal");return}
+  if(state.points<r.cost){closeModal("redeemModal");toast("积分不足，兑换已取消");return}
+  state.points-=r.cost;state.redemptions.push({id:uid("rd_"),rewardId:r.id,rewardName:r.name,cost:r.cost,date:curDate,createdAt:Date.now(),status:"pending"});addPoints(0,"兑换:"+r.name+"(-"+r.cost+")");state.updatedAt=Date.now();saveState();closeModal("redeemModal");renderMall();renderTop();toast("已申请兑换，待家长审核")}
 
 function parentLogin(){var p=document.getElementById("parentPwd").value;if(p===state.parent.password){state.parent.authed=true;saveState();document.getElementById("parentLock").style.display="none";document.getElementById("parentPanel").style.display="block";renderParent();ghRenderStatus();renderTop();toast("已进入家长模式")}else{toast("密码错误")}}
 function parentLogout(){state.parent.authed=false;saveState();document.getElementById("parentPanel").style.display="none";document.getElementById("parentLock").style.display="block";document.getElementById("parentPwd").value="";renderTop();nav("tasks")}
@@ -2089,9 +2176,15 @@ function renderParent(){
   var pend=state.redemptions.filter(function(r){return r.status==="pending"});
   document.getElementById("pendCnt").textContent=pend.length?"待审"+pend.length:"";
   var box=document.getElementById("approveList");
-  if(!pend.length){box.innerHTML='<div class="empty">无待审核兑换</div>';return}
-  box.innerHTML=pend.map(function(r){return '<div class="reward-item"><span class="ri">🎟️</span><div class="rn"><div style="font-weight:500">'+r.rewardName+'</div><div class="task-meta">'+r.cost+'分 · '+r.date+'</div></div><button class="btn sm" onclick="approveRed(\''+r.id+'\')">通过</button><button class="btn danger sm" onclick="rejectRed(\''+r.id+'\')">驳回</button></div>'}).join("");
-  if(state._freezeFlag){var b=document.createElement("div");b.className="ai-box";b.style.background="var(--red-soft)";b.style.color="var(--red)";b.style.borderColor="rgba(255,77,94,.4)";b.innerHTML="⚠️ 检测到今日积分异常增长，已触发审查机制";box.insertBefore(b,box.firstChild);state._freezeFlag=false;saveState()}
+  // 先填充列表，再插入冻结告警（否则无待审兑换时会提前 return，告警永远看不到）
+  box.innerHTML=pend.length
+    ?pend.map(function(r){return '<div class="reward-item"><span class="ri">🎟️</span><div class="rn"><div style="font-weight:500">'+esc(r.rewardName)+'</div><div class="task-meta">'+r.cost+'分 · '+r.date+'</div></div><button class="btn sm" onclick="approveRed(\''+r.id+'\')">通过</button><button class="btn danger sm" onclick="rejectRed(\''+r.id+'\')">驳回</button></div>'}).join("")
+    :'<div class="empty">无待审核兑换</div>';
+  if(state._freezeFlag){
+    var b=document.createElement("div");b.className="ai-box";b.style.background="var(--red-soft)";b.style.color="var(--red)";b.style.borderColor="rgba(255,77,94,.4)";
+    b.innerHTML="⚠️ 检测到今日积分异常增长（超过阈值 "+ (state.parent.freezeThreshold||200) +" 分），已触发审查机制，请核对任务完成情况";
+    box.insertBefore(b,box.firstChild);state._freezeFlag=false;saveState();
+  }
 }
 function approveRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="approved";state.updatedAt=Date.now();saveState();renderParent();toast("已通过兑换")}}
 function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="rejected";state.points+=r.cost;state.updatedAt=Date.now();saveState();renderParent();renderTop();toast("已驳回，积分退还")}}
