@@ -767,6 +767,10 @@ function ghEnabled(){var c=ghCfg();return !!(c&&c.token&&c.enabled)}
 function ghFetch(url,opt,timeout){
   var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
   var o=Object.assign({},opt||{});
+  // 双重防缓存：请求头 no-store 防 HTTP 缓存，URL 时间戳防 Service Worker 的 Cache API 命中。
+  // API 的 URL 每次都一样，一旦任何一层缓存了旧响应，就会读到过期的 sha → 写入 409 → 反复掉线。
+  o.cache='no-store';
+  url=url+(url.indexOf('?')>=0?'&':'?')+'_='+Date.now();
   var t=null;
   if(ctrl){o.signal=ctrl.signal;t=setTimeout(function(){try{ctrl.abort()}catch(e){}},timeout||10000)}
   return fetch(url,o).then(function(r){if(t)clearTimeout(t);return r},
@@ -858,8 +862,13 @@ function ghPushNow(){
       if(res&&res.content&&res.content.sha)ghState.sha=res.content.sha;
       state._dirty=false;ghMarkOk();
     }).catch(function(err){
-      // 多端同时保存会造成版本冲突（409）：重取最新版本号后自动重试，最多 2 轮
-      if(err&&err.conflict&&n<2){ghState.sha=null;return attempt(n+1)}
+      // 409 版本冲突：云端刚写入后读副本有短暂同步延迟，紧接着的 GET 可能拿到上一版 sha。
+      // 这是可自愈的正常冲突——重取 sha 后短延迟再试即可，绝不能计入失败次数，
+      // 否则偶发冲突被累计成"连续失败 2 次"，页面就显示成掉线（这正是反复掉线的来源之一）。
+      if(err&&err.conflict&&n<3){
+        ghState.sha=null;
+        return new Promise(function(res){setTimeout(res,300*(n+1))}).then(function(){return attempt(n+1)});
+      }
       state._dirty=true;ghMarkFail((err&&err.message)||String(err));
     });
   };
@@ -893,7 +902,7 @@ function ghTryAuth(t){
   function next(){
     if(i>=schemes.length)return Promise.reject(new Error('Token 无效/已过期，或未授权访问该仓库'));
     var s=schemes[i++];
-    return fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO,{headers:{'Authorization':s+' '+t,'Accept':'application/vnd.github.v3+json'}})
+    return fetch('https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'?_='+Date.now(),{cache:'no-store',headers:{'Authorization':s+' '+t,'Accept':'application/vnd.github.v3+json'}})
       .then(function(r){
         if(r.ok)return s;
         if(r.status===401||r.status===403||r.status===404)return next();
@@ -2268,7 +2277,11 @@ if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('./sw.js')
       .then(function(registration) {
-        console.log('SW registered: ', registration.scope);
+        // 强制立即检查更新：让修复版 SW（v7 起不再拦截跨域 API）尽快接管，
+        // 否则旧 SW 在本次会话里仍会继续缓存 API 响应，导致同步继续失败
+        return registration.update().catch(function(){}).then(function(){
+          return purgeStaleApiCache();   // 新 SW 接管后再清一次，确保历史毒缓存清干净
+        });
       })
       .catch(function(registrationError) {
         console.log('SW registration failed: ', registrationError);
