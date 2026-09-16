@@ -515,6 +515,8 @@ input,select,textarea{font-family:inherit;font-size:14px}
             <div class="field"><label class="label">GitHub Token（ghp_ 或 github_pat_ 开头）</label><input class="input" id="ghToken" type="password" placeholder="粘贴 Token"></div>
             <div class="row" style="margin-bottom:10px"><button class="btn sm" onclick="ghSaveToken()">保存并启用</button><button class="btn sm ghost" onclick="ghDisable()">停用</button></div>
             <p id="ghStatus" style="font-size:12px;margin-top:4px"></p>
+            <div class="row" style="margin-top:8px"><button class="btn sm ghost" onclick="ghSelfTest()">同步自检</button></div>
+            <p id="ghDiag" style="font-size:12px;margin-top:6px;line-height:1.7"></p>
           </div>
           <div class="card" id="backupCard">
             <div class="card-h">数据备份与恢复</div>
@@ -604,7 +606,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
 </div>
 
 <script>
-var APP_VER="2026-09-05-v3";
+var APP_VER="2026-09-16-v3.10";
 var SUBJECTS=["语文","数学","英语","物理","政治","历史","地理","生物"];
 var SUBJ_COLOR={语文:"#FF4D5E",数学:"#3B9DFF",英语:"#2DE0C8",物理:"#FFA033",政治:"#B266FF",历史:"#C9A063",地理:"#2DC8D8",生物:"#52E088"};
 var SUBJ_TAG={语文:"yu",数学:"shu",英语:"ying",物理:"wu",政治:"zheng",历史:"shi",地理:"di",生物:"sheng"};
@@ -669,7 +671,10 @@ function loadState(){
           if(cloud&&local){state=mergeStates(local,cloud);}
           else if(cloud){state=cloud;}
           normalizeState();
-          state.updatedAt=Date.now();
+          // 加载 ≠ 修改：绝不在这里刷新 updatedAt。
+          // 否则本机时间戳永远"最新"，云端的更新会被判定为不比本地新而跳过合并，
+          // 最终本机旧数据反而覆盖掉云端，造成记录丢失。
+          if(!state.updatedAt)state.updatedAt=Date.now();
           try{localStorage.setItem(STATE_KEY,JSON.stringify(stripAuth(state)))}catch(e){}
           ghMarkOk();
         }).catch(function(e){ghMarkFail((e&&e.message)||String(e))})
@@ -734,6 +739,26 @@ function pushToCloud(s){
 }
 
 // ===== GitHub 云同步（无资料库 SDK 环境下的多端通道：设备 → 仓库 data/state.json → 设备） =====
+/* 清理 Service Worker 里的跨域"毒缓存"：
+   老版本 SW 会把 api.github.com 的响应缓存下来，之后每次同步都读到过期的 sha，
+   写入必然 409 冲突 → 页面显示反复掉线。这里把已装 PWA 的历史缓存一并清掉。 */
+function purgeStaleApiCache(){
+  if(typeof caches==='undefined')return Promise.resolve();
+  var origin=location.origin;
+  return caches.keys().then(function(names){
+    return Promise.all(names.map(function(n){
+      return caches.open(n).then(function(c){
+        return c.keys().then(function(reqs){
+          return Promise.all(reqs.map(function(r){
+            var cross=r.url.indexOf(origin)!==0;
+            if(cross||r.url.indexOf('api.github.com')>=0)return c.delete(r);
+            return null;
+          }));
+        });
+      }).catch(function(){});
+    }));
+  }).catch(function(){});
+}
 function ghCfg(){
   try{return JSON.parse(localStorage.getItem(GH_SYNC_KEY))||null}catch(e){return null}
 }
@@ -818,7 +843,9 @@ function ghPushNow(){
   ghState.syncing=true;ghState.syncStart=Date.now();setSync('syncing');
   var attempt=function(n){
     return ghPull().then(function(cloud){
-      if(cloud&&cloud.updatedAt>(state.updatedAt||0)+1000){
+      // 推送前一律先与云端合并：mergeStates 是幂等并集，多合并一次无损，
+      // 但跳过合并会让本机快照直接覆盖云端，造成另一端记录丢失。
+      if(cloud){
         var wasAuthed=!!(state.parent&&state.parent.authed);
         state=mergeStates(state,cloud);normalizeState();
         if(wasAuthed){if(!state.parent)state.parent=defaultState().parent;state.parent.authed=true}
@@ -890,6 +917,42 @@ function ghSaveToken(){
     })
     .catch(function(e){toast('保存失败：'+e.message)})
     .then(function(){ghRenderStatus()});
+}
+/* 同步自检：一键跑通「读接口 → 读云端 → 写云端」，把真实错误显示出来，方便定位掉线原因 */
+function ghSelfTest(){
+  var el=document.getElementById('ghDiag');
+  if(!el)return;
+  var lines=[];
+  var flush=function(ok){
+    el.innerHTML=lines.join('<br>');
+    el.style.color=ok?'var(--green)':'var(--red)';
+  };
+  if(!ghEnabled()){lines.push('未启用云同步，请先粘贴 Token 并点「保存并启用」。');flush(false);return}
+  el.textContent='检测中…';el.style.color='var(--text-2)';
+  var t0=Date.now();
+  purgeStaleApiCache().then(function(){
+    return ghApi('GET','/rate_limit');
+  }).then(function(j){
+    var core=(j&&j.resources&&j.resources.core)||{};
+    lines.push('① 读写接口连通：正常（'+((Date.now()-t0)/1000).toFixed(1)+'s，剩余配额 '+(core.remaining!=null?core.remaining:'-')+'/'+(core.limit!=null?core.limit:'-')+'）');
+    return ghPull();
+  }).then(function(cloud){
+    lines.push('② 读取云端数据：'+(cloud
+      ? '成功，云端最后更新 '+new Date(cloud.updatedAt||0).toLocaleString('zh-CN')
+      : '云端暂无数据文件'));
+    var t1=Date.now();
+    return ghPushNow().then(function(){lines.push('③ 上传本机数据：成功（'+((Date.now()-t1)/1000).toFixed(1)+'s）')});
+  }).then(function(){
+    if(ghState.tokenBad){lines.push('⚠ Token 异常，仅能读取无法上传');flush(false);return}
+    if(state._dirty){lines.push('⚠ 上传未成功，本机改动暂存本地');flush(false);return}
+    lines.push('④ 结论：<b>同步正常</b>，本机与云端已一致。');
+    flush(true);
+  }).catch(function(e){
+    lines.push('✗ 失败环节：'+((e&&e.message)||e));
+    if(ghState.tokenBad)lines.push('→ Token 已失效或权限不足（需 Contents: Read and write），请重新生成后粘贴');
+    else if(/超时|网络/.test(String((e&&e.message)||e)))lines.push('→ 网络不通畅，可稍后重试；数据已存本机，不会丢失');
+    flush(false);
+  });
 }
 function ghDisable(){
   var c=ghCfg()||{token:'',enabled:false};c.enabled=false;
@@ -2190,7 +2253,8 @@ function approveRed(id){var r=state.redemptions.find(function(x){return x.id===i
 function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="rejected";state.points+=r.cost;state.updatedAt=Date.now();saveState();renderParent();renderTop();toast("已驳回，积分退还")}}
 function changePwd(){var np=document.getElementById("newPwd").value;if(np.length<4){toast("密码至少4位");return}state.parent.password=np;state.updatedAt=Date.now();saveState();document.getElementById("newPwd").value="";toast("密码已修改")}
 
-loadState().then(function(){
+// 先清掉历史遗留的跨域"毒缓存"，再加载数据；否则同步会一直读到过期的 sha 而反复掉线
+purgeStaleApiCache().then(function(){return loadState()}).then(function(){
   renderTop();renderTasks();renderBackup();
   var mnDate=document.getElementById("mnDate");
   if(mnDate&&!mnDate.value)mnDate.value=curDate;
