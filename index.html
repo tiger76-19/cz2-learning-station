@@ -612,7 +612,7 @@ var DATABASE_ID="pnCUnO09ylRJpdKiRfHP8A";
 var STATE_KEY="cz2_state";
 var GH_SYNC_KEY="cz2_gh_sync";
 var GH_OWNER="tiger76-19",GH_REPO="cz2-learning-station",GH_PATH="data/state.json";
-var ghState={syncing:false,sha:null,debounce:null,lastErr:""};
+var ghState={syncing:false,sha:null,debounce:null,lastErr:"",failCount:0,lastOk:0,syncStart:0,retryTimer:null,retryDelay:5000,bannerTimer:null,tokenBad:false,probing:false};
 
 var defaultState=function(){
   return {
@@ -659,8 +659,8 @@ function loadState(){
           normalizeState();
           state.updatedAt=Date.now();
           try{localStorage.setItem(STATE_KEY,JSON.stringify(state))}catch(e){}
-          setSync('synced');
-        }).catch(function(){setSync('offline')})
+          ghMarkOk();
+        }).catch(function(e){ghMarkFail((e&&e.message)||String(e))})
         .then(function(){resolve()});
         return;
       }
@@ -713,15 +713,29 @@ function ghCfg(){
   try{return JSON.parse(localStorage.getItem(GH_SYNC_KEY))||null}catch(e){return null}
 }
 function ghEnabled(){var c=ghCfg();return !!(c&&c.token&&c.enabled)}
+/* 带超时的 fetch：弱网下请求不再无限挂起（挂起会让 syncing 永久卡住、所有自动重试失效） */
+function ghFetch(url,opt,timeout){
+  var ctrl=(typeof AbortController!=='undefined')?new AbortController():null;
+  var o=Object.assign({},opt||{});
+  var t=null;
+  if(ctrl){o.signal=ctrl.signal;t=setTimeout(function(){try{ctrl.abort()}catch(e){}},timeout||10000)}
+  return fetch(url,o).then(function(r){if(t)clearTimeout(t);return r},
+    function(e){if(t)clearTimeout(t);throw new Error((e&&e.name==='AbortError')?'请求超时':((e&&e.message)||'网络不可达'))});
+}
 function ghApi(method,path,body){
   var cfg=ghCfg();
-  return fetch('https://api.github.com'+path,{
+  return ghFetch('https://api.github.com'+path,{
     method:method,
     headers:{'Authorization':(cfg.scheme||'Bearer')+' '+cfg.token,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'},
     body:body?JSON.stringify(body):undefined
-  }).then(function(r){
+  },method==='PUT'?15000:10000).then(function(r){
     if(r.status===404)return null;
-    if(!r.ok)return r.json().catch(function(){return{}}).then(function(j){throw new Error(r.status+' '+(j&&j.message||''))});
+    if(r.status===409){var ce=new Error('409 版本冲突');ce.conflict=true;throw ce}
+    if(r.status===401||r.status===403){ghState.tokenBad=true;var ae=new Error(r.status===401?'Token 已失效':'Token 无写入权限');ae.badToken=true;throw ae}
+    if(!r.ok)return r.json().catch(function(){return{}}).then(function(j){
+      var e=new Error(r.status+' '+(j&&j.message||''));e.status=r.status;throw e;
+    });
+    ghState.tokenBad=false;   // 带 Token 请求成功 → Token 有效
     return r.json();
   });
 }
@@ -734,34 +748,66 @@ function ghPull(){
     ghState.sha=j.sha;
     return safeParse(b64Utf8(j.content));
   };
-  return fetch(url,{headers:{'Accept':'application/vnd.github.v3+json'}})
-    .then(function(r){
-      if(r.status===404)return null;
-      if(!r.ok)throw new Error('匿名GET '+r.status);
-      return r.json();
-    })
-    .then(parse)
-    .catch(function(){
-      return ghApi('GET','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH).then(parse);
-    });
+  var anon=function(){
+    return ghFetch(url,{headers:{'Accept':'application/vnd.github.v3+json'}},10000)
+      .then(function(r){
+        if(r.status===404)return null;
+        if(!r.ok)throw new Error('匿名GET '+r.status);
+        return r.json();
+      });
+  };
+  var auth=function(){return ghApi('GET','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH)};
+  // 已配置 Token 时优先走 Token：配额 5000 次/小时，而匿名仅 60 次/小时（同宽带下多设备共用 IP 极易打满）
+  var first=ghEnabled()?auth:anon, second=ghEnabled()?anon:auth;
+  return first().then(parse).catch(function(){return second().then(parse)});
+}
+/* 成功：清零失败计数并取消重试计划 */
+function ghMarkOk(){
+  ghState.failCount=0;ghState.lastErr="";ghState.lastOk=Date.now();
+  if(ghState.retryTimer){clearTimeout(ghState.retryTimer);ghState.retryTimer=null}
+  ghState.retryDelay=5000;
+  setSync(ghState.tokenBad?'readonly':'synced');
+}
+/* 失败：第一次只标记「重连中」，连续失败 2 次以上才正式显示离线；并按 5s→10s→20s→…→60s 退避重试 */
+function ghMarkFail(msg){
+  ghState.failCount=(ghState.failCount||0)+1;
+  ghState.lastErr=msg||'';
+  ghState.sha=null;
+  setSync(ghState.failCount>=2?'offline':'syncing');
+  ghScheduleRetry();
+}
+function ghScheduleRetry(){
+  if(ghState.retryTimer)return;
+  if(!ghEnabled()||hasSDK())return;
+  var d=ghState.retryDelay||5000;
+  // Token 失效不是网络抖动，无需频繁重试；每 5 分钟探测一次，等用户换好 Token 即可恢复
+  if(ghState.tokenBad)d=300000;
+  ghState.retryDelay=ghState.tokenBad?300000:Math.min(d*2,60000);
+  ghState.retryTimer=setTimeout(function(){ghState.retryTimer=null;ghRecover(true)},d);
 }
 function ghPushNow(){
-  if(ghState.syncing)return Promise.resolve();
-  ghState.syncing=true;setSync('syncing');
-  return ghPull().then(function(cloud){
-    if(cloud&&cloud.updatedAt>(state.updatedAt||0)+1000){state=mergeStates(state,cloud);normalizeState();}
-    state.updatedAt=Date.now();
-    var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(state))};
-    if(ghState.sha)body.sha=ghState.sha;
-    return ghApi('PUT','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH,body);
-  }).then(function(res){
-    if(res&&res.content&&res.content.sha)ghState.sha=res.content.sha;
-    state._dirty=false;
-    ghState.lastErr="";setSync('synced');
-  }).catch(function(err){
-    state._dirty=true;
-    ghState.lastErr=(err&&err.message)||String(err);ghState.sha=null;setSync('offline');
-  }).then(function(){ghState.syncing=false});
+  if(!ghEnabled())return Promise.resolve();
+  // Token 已失效时推送必然失败，直接标为「只读取」，避免反复失败刷成离线
+  if(ghState.tokenBad&&!ghState.probing){setSync('readonly');return Promise.resolve()}
+  if(ghState.syncing&&Date.now()-(ghState.syncStart||0)<30000)return Promise.resolve();
+  ghState.syncing=true;ghState.syncStart=Date.now();setSync('syncing');
+  var attempt=function(n){
+    return ghPull().then(function(cloud){
+      if(cloud&&cloud.updatedAt>(state.updatedAt||0)+1000){state=mergeStates(state,cloud);normalizeState();}
+      state.updatedAt=Date.now();
+      var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(state))};
+      if(ghState.sha)body.sha=ghState.sha;
+      return ghApi('PUT','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH,body);
+    }).then(function(res){
+      if(res&&res.content&&res.content.sha)ghState.sha=res.content.sha;
+      state._dirty=false;ghMarkOk();
+    }).catch(function(err){
+      // 多端同时保存会造成版本冲突（409）：重取最新版本号后自动重试，最多 2 轮
+      if(err&&err.conflict&&n<2){ghState.sha=null;return attempt(n+1)}
+      state._dirty=true;ghMarkFail((err&&err.message)||String(err));
+    });
+  };
+  return attempt(0).then(function(){ghState.syncing=false});
 }
 function pushToGitHub(){
   if(ghState.debounce)clearTimeout(ghState.debounce);
@@ -772,8 +818,13 @@ function ghRenderStatus(){
   var el=document.getElementById('ghStatus');if(!el)return;
   var c=ghCfg();
   if(c&&c.token&&c.enabled){
-    el.textContent=ghState.lastErr?('已启用，上次同步失败：'+ghState.lastErr):'已启用：数据将通过 GitHub 云端多端同步';
-    el.style.color=ghState.lastErr?'var(--red)':'var(--green)';
+    if(ghState.tokenBad){
+      el.textContent='⚠️ Token 已失效或权限不足：当前只能读取云端，无法上传。请重新生成 Token 并粘贴保存';
+      el.style.color='var(--red)';
+    }else{
+      el.textContent=ghState.lastErr?('已启用，上次同步失败：'+ghState.lastErr):'已启用：数据将通过 GitHub 云端多端同步';
+      el.style.color=ghState.lastErr?'var(--red)':'var(--green)';
+    }
   }else if(c&&c.token){
     el.textContent='Token 已保存但未启用';el.style.color='var(--text-2)';
   }else{
@@ -801,8 +852,12 @@ function ghSaveToken(){
   ghTryAuth(v)
     .then(function(scheme){
       localStorage.setItem(GH_SYNC_KEY,JSON.stringify({token:v,enabled:true,scheme:scheme}));
-      ghState.sha=null;toast('Token 有效，云同步已启用');
-      return ghPushNow();
+      // 换上新 Token 后彻底复位失败状态，并立即补推本机积压数据
+      ghState.sha=null;ghState.tokenBad=false;ghState.failCount=0;ghState.retryDelay=5000;
+      if(ghState.retryTimer){clearTimeout(ghState.retryTimer);ghState.retryTimer=null}
+      toast('Token 有效，云同步已启用');
+      ghState.probing=true;
+      return ghPushNow().then(function(){ghState.probing=false});
     })
     .catch(function(e){toast('保存失败：'+e.message)})
     .then(function(){ghRenderStatus()});
@@ -814,9 +869,11 @@ function ghDisable(){
 }
 
 // ===== 同步自愈：离线自动重试 + 回到页面自动拉云端，无需手动刷新 =====
-var ghFocusAt=0,ghRetryTimer=null;
+var ghFocusAt=0;
 function ghRecover(silent){
-  if(!ghEnabled()||hasSDK()||ghState.syncing)return Promise.resolve();
+  if(!ghEnabled()||hasSDK())return Promise.resolve();
+  // 看门狗：同步若卡死超过 30 秒也放行，避免 syncing 永久为 true 导致再也不重试
+  if(ghState.syncing&&Date.now()-(ghState.syncStart||0)<30000)return Promise.resolve();
   var now=Date.now();
   if(!silent&&now-ghFocusAt<30000)return Promise.resolve();  // 30s 节流
   ghFocusAt=now;
@@ -831,14 +888,24 @@ function ghRecover(silent){
       var pg=act&&act.getAttribute('data-page');
       if(pg&&pg!=='parent')nav(pg);   // 家长页不自动重渲染，避免打断输入
     }else if(cloudNewer){state._dirty=true}
-    ghState.lastErr="";setSync('synced');
-    if(state._dirty)ghPushNow();          // 离线期间的本地改动自动补推
-  }).catch(function(){
-    if(!ghRetryTimer)ghRetryTimer=setTimeout(function(){ghRetryTimer=null;ghRecover(true)},60000);
-  });
+    ghMarkOk();
+    if(state._dirty&&!ghState.tokenBad){ghState.syncing=false;ghPushNow()}  // 离线期间的本地改动自动补推
+  }).catch(function(e){ghMarkFail((e&&e.message)||String(e))})
+    .then(function(){
+      // Token 失效时要持续低频探测，用户换好 Token 后无需刷新页面即可自动恢复
+      if(ghState.tokenBad)ghScheduleRetry();
+    });
 }
 document.addEventListener('visibilitychange',function(){if(!document.hidden)ghRecover(false)});
 window.addEventListener('focus',function(){ghRecover(false)});
+/* 心跳保活：页面可见时每 90 秒静默同步一次，不依赖用户切窗口也能自愈 */
+setInterval(function(){if(!document.hidden&&ghEnabled()&&!hasSDK())ghRecover(true)},90000);
+/* 看门狗：同步挂起超 30 秒判定失败并触发重试，不再需要手动刷新 */
+setInterval(function(){
+  if(ghState.syncing&&Date.now()-(ghState.syncStart||0)>30000){
+    ghState.syncing=false;ghMarkFail('请求超时');
+  }
+},10000);
 
 function mergeStates(local,cloud){
   var result={};
@@ -966,13 +1033,33 @@ function setSync(status){
   var dot=document.getElementById('syncDot');
   var txt=document.getElementById('syncText');
   var banner=document.getElementById('syncBanner');
-  dot.className='sync-dot'+(status==='offline'?' off':(status==='syncing'?' syncing':''));
-  txt.textContent=status==='synced'?'已同步':(status==='syncing'?'同步中':(status==='offline'?(ghState.lastErr?'离线':'离线'):'本地'));
-  banner.className='sync-banner'+(status==='offline'&&(hasSDK()||ghEnabled())?' show':'');
-  if(status==='offline'&&ghState.lastErr){
-    banner.textContent='云端读取失败（'+ghState.lastErr+'）— 数据暂存本机未丢失，网络恢复后重开页面自动同步';
-  }else if(status!=='offline'){
-    banner.textContent='离线模式：数据暂存本地，恢复网络后将自动同步到云端';
+  if(!dot||!txt||!banner)return;
+  dot.className='sync-dot'+(status==='offline'?' off':(status==='syncing'?' syncing':(status==='readonly'?' syncing':'')));
+  var label;
+  if(status==='synced')label='已同步';
+  else if(status==='syncing')label=(ghState.failCount?'重连中':'同步中');
+  else if(status==='readonly')label='只读取';
+  else if(status==='offline')label='离线';
+  else label='本地';
+  txt.textContent=label;
+  // 横幅延迟 8 秒才显示：网络一抖就闪红条很干扰，能自愈的抖动用户无需感知
+  if(ghState.bannerTimer){clearTimeout(ghState.bannerTimer);ghState.bannerTimer=null}
+  if(status==='readonly'&&ghEnabled()){
+    // Token 失效需要用户处理，立即提示（不延迟）
+    banner.textContent='⚠️ Token 已失效：能看到云端数据，但本机新记录无法上传。请到「家长视图 → 多端云同步」重新粘贴 Token';
+    banner.className='sync-banner show';
+    return;
+  }
+  if(status==='offline'&&(hasSDK()||ghEnabled())){
+    ghState.bannerTimer=setTimeout(function(){
+      ghState.bannerTimer=null;
+      banner.textContent=ghState.lastErr
+        ?('云端同步暂不可用（'+ghState.lastErr+'）— 数据已存在本机不会丢失，正在自动重连')
+        :'离线模式：数据暂存本地，恢复网络后将自动同步到云端';
+      banner.className='sync-banner show';
+    },8000);
+  }else{
+    banner.className='sync-banner';
   }
 }
 
