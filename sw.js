@@ -1,5 +1,5 @@
 // Service Worker for PWA installation (v7 - 相对路径 + 页面网络优先 + 跨域 API 放行)
-const CACHE_NAME = 'cz2-learning-station-v7';
+const CACHE_NAME = 'cz2-learning-station-v8';
 const ASSETS = [
   './',
   './index.html',
