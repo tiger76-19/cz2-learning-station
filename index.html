@@ -521,7 +521,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
           </div>
           <div class="card" id="ptsAuditCard">
             <div class="card-h">积分对账</div>
-            <p style="font-size:12px;color:var(--text-2);margin-bottom:10px">正常时「累计获得 − 已兑换」应当正好等于当前余额。若三者对不上，多半是旧版本同步缺陷把积分算重或吞掉了，可在此一键校正。</p>
+            <p style="font-size:12px;color:var(--text-2);margin-bottom:10px">本卡以「积分流水」为账本核对余额：<b>收入合计 − 支出合计 = 当前可用余额</b>。注意「收入」里含驳回退还、「支出」里含取消完成打勾扣回的分，因此不等于「赚了多少 − 兑换了多少」。若余额对不上，多半是旧版本同步缺陷把积分算重或吞掉了，可在此一键校正。</p>
             <div id="ptsAudit" style="font-size:12px;color:var(--text-2);line-height:1.8;margin-bottom:10px"></div>
             <div class="row" style="flex-wrap:wrap">
               <button class="btn sm ghost" onclick="auditPoints()">检查账目</button>
@@ -616,7 +616,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
 </div>
 
 <script>
-var APP_VER="2026-09-18-v3.11";
+var APP_VER="2026-09-18-v3.12";
 var SUBJECTS=["语文","数学","英语","物理","政治","历史","地理","生物"];
 var SUBJ_COLOR={语文:"#FF4D5E",数学:"#3B9DFF",英语:"#2DE0C8",物理:"#FFA033",政治:"#B266FF",历史:"#C9A063",地理:"#2DC8D8",生物:"#52E088"};
 var SUBJ_TAG={语文:"yu",数学:"shu",英语:"ying",物理:"wu",政治:"zheng",历史:"shi",地理:"di",生物:"sheng"};
@@ -1387,10 +1387,13 @@ function calcStreak(){
   state.streak=s;
 }
 
-function addPoints(delta,reason){
+function addPoints(delta,reason,ref){
   state.points+=delta;
   // 每条流水带唯一 id：跨端合并时据此去重，避免同一条被重复计入（积分虚高的根因）
-  state.pointsLog.unshift({id:uid("pl_"),time:Date.now(),delta:delta,reason:reason});
+  // ref 指向来源单据（如兑换单 id），对账时据此精确判断该笔是否已在流水中扣减，不再靠原因文本猜
+  var entry={id:uid("pl_"),time:Date.now(),delta:delta,reason:reason};
+  if(ref)entry.ref=ref;
+  state.pointsLog.unshift(entry);
   if(state.pointsLog.length>300)state.pointsLog=state.pointsLog.slice(0,300);
   state.updatedAt=Date.now();saveState();
   var todayLog=state.pointsLog.filter(function(l){return new Date(l.time).toISOString().slice(0,10)===curDate&&l.delta>0});
@@ -1799,12 +1802,10 @@ function renderHistSummary(){
   // 两者本来就不同（赚取的分若已兑换出去，余额会相应减少），明确写出来避免误认为对不上账
   var note=document.getElementById("histPtsNote");
   if(note){
-    var earned=0;
-    (state.pointsLog||[]).forEach(function(l){if(l&&l.delta>0)earned+=(l.delta||0)});
-    var spent=(state.redemptions||[]).filter(function(r){return r&&r.status!=="rejected"})
-      .reduce(function(a,r){return a+(r.cost||0)},0);
-    note.textContent="本月获得 "+s.pts+" 分｜有记录以来累计获得 "+earned+" 分，已兑换消耗 "+spent
-      +" 分，当前可用余额 "+(state.points||0)+" 分（顶部那个数字就是它）";
+    // 与家长视图「积分对账」共用同一套口径，避免两处各说各话
+    var a=ptsAuditData();
+    note.textContent="本月获得 "+s.pts+" 分｜有记录以来累计收入 "+a.income+" 分、累计支出 "+a.outgo
+      +" 分，当前可用余额 "+a.current+" 分（顶部那个数字就是它）";
   }
 }
 function renderHistCalendar(){
@@ -2269,8 +2270,9 @@ function confirmRedeem(){var id=window._redeemId;var r=state.rewards.find(functi
   if(state.points<r.cost){closeModal("redeemModal");toast("积分不足，兑换已取消");return}
   // 扣分与流水必须走同一条路径：此前是手工 state.points-=cost 却记 delta:0 的流水，
   // 导致"积分流水"里完全看不到扣减，历史回看的获得分与余额也永远对不上
-  state.redemptions.push({id:uid("rd_"),rewardId:r.id,rewardName:r.name,cost:r.cost,date:curDate,createdAt:Date.now(),status:"pending"});
-  addPoints(-r.cost,"兑换:"+r.name);state.updatedAt=Date.now();saveState();closeModal("redeemModal");renderMall();renderTop();toast("已申请兑换，待家长审核")}
+  var rd={id:uid("rd_"),rewardId:r.id,rewardName:r.name,cost:r.cost,date:curDate,createdAt:Date.now(),status:"pending"};
+  state.redemptions.push(rd);
+  addPoints(-r.cost,"兑换:"+r.name,rd.id);state.updatedAt=Date.now();saveState();closeModal("redeemModal");renderMall();renderTop();toast("已申请兑换，待家长审核")}
 
 function parentLogin(){var p=document.getElementById("parentPwd").value;if(p===state.parent.password){state.parent.authed=true;saveState();document.getElementById("parentLock").style.display="none";document.getElementById("parentPanel").style.display="block";renderParent();ghRenderStatus();renderTop();toast("已进入家长模式")}else{toast("密码错误")}}
 function parentLogout(){state.parent.authed=false;saveState();document.getElementById("parentPanel").style.display="none";document.getElementById("parentLock").style.display="block";document.getElementById("parentPwd").value="";renderTop();nav("tasks")}
@@ -2297,7 +2299,7 @@ function renderParent(){
   }
 }
 function approveRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="approved";state.updatedAt=Date.now();saveState();renderParent();toast("已通过兑换")}}
-function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="rejected";addPoints(r.cost,"驳回退还:"+(r.rewardName||""));state.updatedAt=Date.now();saveState();renderParent();renderTop();toast("已驳回，积分退还")}}
+function rejectRed(id){var r=state.redemptions.find(function(x){return x.id===id});if(r){r.status="rejected";addPoints(r.cost,"驳回退还:"+(r.rewardName||""),r.id);state.updatedAt=Date.now();saveState();renderParent();renderTop();toast("已驳回，积分退还")}}
 /* ===== 积分对账：以「去重后的流水」为账本反推应有余额，找出被历史同步缺陷吞掉/算重的积分 ===== */
 function ptsAuditData(){
   var map={};
@@ -2307,25 +2309,57 @@ function ptsAuditData(){
     map[k]=l;
   });
   var logs=Object.keys(map).map(function(k){return map[k]});
-  var net=0,earned=0,negLog=0;
+  var income=0,outgo=0;
   logs.forEach(function(l){
     var d=l.delta||0;
-    net+=d;
-    if(d>0)earned+=d; else negLog+=-d;
+    if(d>=0)income+=d; else outgo+=-d;
   });
-  // 用「流水净额」推算余额，而不是「获得 − 消耗」：
-  // 被驳回的兑换会先记 -cost 再记 +cost（净额为 0，正确），
-  // 若用两个聚合量相减，那笔退回会被算进"获得"却不计入"消耗"，凭空多出 cost 分。
-  var spent=(state.redemptions||[]).filter(function(r){return r&&r.status!=="rejected"})
-    .reduce(function(a,r){return a+(r.cost||0)},0);
-  // 旧版本的兑换流水记的是 delta:0，日志里少扣了这部分，用兑换记录补齐差额
-  var extra=Math.max(0,spent-negLog);
+  var net=income-outgo;
+  // 收支按原因归类，让家长看得见这些分究竟怎么来的、怎么没的
+  function breakdown(positive){
+    var m={};
+    logs.forEach(function(l){
+      var d=l.delta||0;
+      if(positive?(d<=0):(d>=0))return;
+      var k=String(l.reason||"其他").split(/[:：]/)[0]||"其他";
+      m[k]=(m[k]||0)+Math.abs(d);
+    });
+    return Object.keys(m).map(function(k){return {k:k,v:m[k]}}).sort(function(a,b){return b.v-a.v});
+  }
+  // 旧版本的兑换流水记的是 delta:0（余额扣了、流水没记），此处按兑换单补齐少扣的差额。
+  // 新版本流水带 ref 指向兑换单 id，可直接判定是否已扣，不再依赖原因文本匹配。
+  // 旧的「支出合计 − 兑换合计」估算在「旧版漏记兑换 + 新版驳回兑换」同时存在时会多补 30 分：
+  // 驳回那对的 -cost/+cost 净额为 0，却把"流水里已有的扣减"抬高了，于是真正漏扣的部分被少算。
+  var negByRef={},legacyNeg=[];
+  logs.forEach(function(l){
+    if((l.delta||0)<0){
+      if(l.ref)negByRef[l.ref]=true; else legacyNeg.push(l.reason||"");
+    }
+  });
+  var applied=0,pendCount=0,uncovered=0,rejCount=0,rejCost=0;
+  (state.redemptions||[]).forEach(function(r){
+    if(!r)return;
+    if(r.status==="rejected"){rejCount++;rejCost+=(r.cost||0);return}
+    applied+=(r.cost||0);pendCount++;
+    if(negByRef[r.id])return;
+    var nm=r.rewardName||"";
+    var hit=nm&&legacyNeg.some(function(s){return s.indexOf(nm)>=0});
+    if(!hit)uncovered+=(r.cost||0);
+  });
   return {
     raw:(state.pointsLog||[]).length,
     dedup:logs.length,
-    earned:earned,
-    spent:spent,
-    derived:net-extra,
+    income:income,          // 流水收入合计（含驳回退还）
+    outgo:outgo,            // 流水支出合计（含取消完成、兑换扣分）
+    net:net,                // 流水净额
+    incomeList:breakdown(true),
+    outgoList:breakdown(false),
+    applied:applied,        // 兑换消耗（未驳回的兑换单合计）
+    pendCount:pendCount,
+    rejCount:rejCount,
+    rejCost:rejCost,
+    uncovered:uncovered,    // 旧版漏记流水的兑换，需补扣
+    derived:net-uncovered,  // 应有余额
     current:state.points||0
   };
 }
@@ -2333,20 +2367,31 @@ function auditPoints(){
   var el=document.getElementById("ptsAudit");
   if(!el)return;
   var d=ptsAuditData();
+  function fmt(list){return list.length?list.map(function(x){return x.k+" "+x.v}).join("、"):"—"}
   var h="流水 "+d.raw+" 条";
   if(d.raw>d.dedup)h+='（去重后 '+d.dedup+' 条，历史重复 '+(d.raw-d.dedup)+' 条）';
-  h+="<br>累计获得 "+d.earned+" 分 · 已兑换消耗 "+d.spent+" 分 · 应有余额 <b>"+d.derived+"</b> 分";
+  h+="<br>收入合计 <b>"+d.income+"</b> 分 − 支出合计 <b>"+d.outgo+"</b> 分 = 流水净额 <b>"+d.net+"</b> 分";
+  if(d.uncovered>0)h+='<br>旧版兑换漏记流水 <b>'+d.uncovered+'</b> 分（余额已扣、流水未记），需补扣';
+  h+="<br>应有余额 <b>"+d.derived+"</b> 分";
   h+="<br>当前余额 <b>"+d.current+"</b> 分";
-  if(d.derived>d.current)h+='<br><b style="color:var(--amber)">少了 '+(d.derived-d.current)+' 分，可点右侧「按流水补回积分」</b>';
-  else if(d.derived<d.current)h+='<br><span style="color:var(--text-3)">明细早于流水保留范围，余额以当前值为准（不减少）</span>';
+  if(d.derived>d.current)h+='<br><b style="color:var(--amber)">少了 '+(d.derived-d.current)+' 分，可点下方「按流水补回积分」</b>';
+  else if(d.derived<d.current)h+='<br><span style="color:var(--text-3)">流水已被 300 条上限截断，余额以当前值为准（只补不扣）</span>';
   else h+='<br><b style="color:var(--green)">账目一致</b>';
+  h+='<br><span style="color:var(--text-3)">收入构成：'+fmt(d.incomeList)+'</span>';
+  h+='<br><span style="color:var(--text-3)">支出构成：'+fmt(d.outgoList)+'</span>';
+  if(d.pendCount>0||d.rejCount>0){
+    var s="兑换单 "+d.pendCount+" 笔共 "+d.applied+" 分（计入支出）";
+    if(d.rejCount>0)s+="；已驳回 "+d.rejCount+" 笔共 "+d.rejCost+" 分（积分已退还，故不计入消耗）";
+    h+='<br><span style="color:var(--text-3)">'+s+'</span>';
+  }
   el.innerHTML=h;
 }
 function fixPoints(){
   var d=ptsAuditData();
   auditPoints();
   if(d.derived<=d.current){toast("当前余额已是较大值，无需补回");return}
-  uiConfirm("把余额从 "+d.current+" 分补回至 "+d.derived+" 分？<br>（累计获得 "+d.earned+" − 已兑换 "+d.spent+"）",function(){
+  uiConfirm("把余额从 "+d.current+" 分补回至 "+d.derived+" 分？<br>（收入 "+d.income
+    +" − 支出 "+d.outgo+(d.uncovered>0?" − 旧版漏扣 "+d.uncovered:"")+" = "+d.derived+"）",function(){
     state.points=d.derived;
     state.updatedAt=Date.now();saveState();renderTop();auditPoints();
     toast("已补回 "+(d.derived-d.current)+" 分");
