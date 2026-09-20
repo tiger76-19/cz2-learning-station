@@ -616,7 +616,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
 </div>
 
 <script>
-var APP_VER="2026-09-18-v3.12";
+var APP_VER="2026-09-20-v3.13";
 var SUBJECTS=["语文","数学","英语","物理","政治","历史","地理","生物"];
 var SUBJ_COLOR={语文:"#FF4D5E",数学:"#3B9DFF",英语:"#2DE0C8",物理:"#FFA033",政治:"#B266FF",历史:"#C9A063",地理:"#2DC8D8",生物:"#52E088"};
 var SUBJ_TAG={语文:"yu",数学:"shu",英语:"ying",物理:"wu",政治:"zheng",历史:"shi",地理:"di",生物:"sheng"};
@@ -651,14 +651,21 @@ var defaultState=function(){
 };
 
 var state;
-var curDate=new Date().toISOString().slice(0,10);
+/* 日期一律用**本地日历日**（YYYY-MM-DD）。
+   此前用 d.toISOString().slice(0,10) 取的是 UTC 日期，在东八区意味着
+   本地 00:00–08:00 这 8 小时里「今天」其实指向昨天：
+   早上 7:30 记的学习时长会被写进昨天的桶，8:00 一过「今日时长」就归零，
+   记的时长看起来"跑到昨天去了"。全站改用本地日期后，日界回到用户感知的 00:00。 */
+function fmt(d){
+  return d.getFullYear()+"-"+((d.getMonth()+1)<10?"0":"")+(d.getMonth()+1)+"-"+(d.getDate()<10?"0":"")+d.getDate();
+}
+var curDate=fmt(new Date());
 var VIEW_DATE=curDate; /* 任务中枢当前浏览的日期，可回看过去某天 */
 var dbState={online:false,recordId:null,syncing:false};
 
 function hasSDK(){return !!(window.__SMART_PAGE__&&window.__SMART_PAGE__.database)}
 function safeParse(s){try{return JSON.parse(s)}catch(e){return null}}
 function uid(p){return p+Math.random().toString(36).slice(2,8)}
-function fmt(d){return d.toISOString().slice(0,10)}
 
 function loadState(){
   return new Promise(function(resolve){
@@ -724,6 +731,13 @@ function readLocal(){
 function stripAuth(s){
   try{var c=JSON.parse(JSON.stringify(s));if(c&&c.parent)c.parent.authed=false;return c}catch(e){return s}
 }
+// 上云快照：在 stripAuth 之上再去掉「本机设备状态」——计时器只属于当前这台设备，
+// 一旦上云，另一台设备打开就会进入"计时中"，同一段专注被两端各点一次结束 → 时长翻倍
+function snapshotForCloud(s){
+  var c=stripAuth(s);
+  try{if(c)c.timer=null}catch(e){}
+  return c;
+}
 function saveParentAuth(){
   try{
     if(state&&state.parent&&state.parent.authed)sessionStorage.setItem(PARENT_AUTH_KEY,"1");
@@ -733,7 +747,7 @@ function saveParentAuth(){
 function saveState(){
   saveParentAuth();
   try{localStorage.setItem(STATE_KEY,JSON.stringify(stripAuth(state)))}catch(e){}
-  var payload=stripAuth(state);
+  var payload=snapshotForCloud(state);
   if(hasSDK()&&dbState.online)pushToCloud(payload);
   else if(!hasSDK()&&ghEnabled()){state._dirty=true;pushToGitHub()}
 }
@@ -865,7 +879,7 @@ function ghPushNow(){
         if(wasAuthed){if(!state.parent)state.parent=defaultState().parent;state.parent.authed=true}
       }
       state.updatedAt=Date.now();
-      var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(stripAuth(state)))};
+      var body={message:'sync '+new Date().toISOString(),content:utf8B64(JSON.stringify(snapshotForCloud(state)))};
       if(ghState.sha)body.sha=ghState.sha;
       return ghApi('PUT','/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/'+GH_PATH,body);
     }).then(function(res){
@@ -1056,7 +1070,9 @@ function mergeStates(local,cloud){
   result.wrongQuestions=mergeAliveById(local.wrongQuestions,cloud.wrongQuestions);
   result.redemptions=mergeById(local.redemptions,cloud.redemptions);
   result.studySessions=mergeAliveById(local.studySessions,cloud.studySessions);
-  result.timer=pickNewer(local.timer,cloud.timer)||null;
+  // 计时器是「本机设备状态」，不随云同步：否则平板在计时会把电脑也带成"计时中"，
+  // 同一段专注两端各点一次「结束」就各存一条，学习时长直接翻倍
+  result.timer=local.timer||null;
   result.phases=mergeAliveById(local.phases,cloud.phases).map(function(p){
     if(!p||!p.items)return p;
     p.items=p.items.filter(function(it){return it&&it.id&&!DELETED[it.id]});
@@ -1067,7 +1083,35 @@ function mergeStates(local,cloud){
     return (la||[]).concat(ca||[]).filter(function(x){if(!x)return false;var k=x[key];if(seen[k])return false;seen[k]=1;return true});
   };
   result.checkins=Object.assign({},cloud.checkins||{},local.checkins||{});
-  result.studyLogs=Object.assign({},cloud.studyLogs||{},local.studyLogs||{});
+  /* 每日时长 studyLogs 改为「以逐条会话明细重新聚合」，不再两端取一份覆盖：
+     原来用 Object.assign 是覆盖语义 —— 电脑记 30 分钟、平板记 20 分钟，
+     合并后只剩 30 分钟，另一端的 20 分钟凭空消失，且与下面的会话明细自相矛盾。
+     会话带唯一 id，可去重、可删，是唯一可信来源；只有「该日没有任何会话明细」时
+     才回退到两端的旧聚合值，用来兜住被 500 条上限截断掉的历史。 */
+  var agg={};
+  (result.studySessions||[]).forEach(function(s){
+    if(!s||!s.date)return;
+    var m=Number(s.minutes);
+    if(!isFinite(m)||m<=0)return;
+    agg[s.date]=(agg[s.date]||0)+m;
+  });
+  var logs={};
+  [local.studyLogs,cloud.studyLogs].forEach(function(src){
+    Object.keys(src||{}).forEach(function(k){
+      var v=Number(src[k]);
+      if(!isFinite(v)||v<=0)return;          // 顺带清掉历史版本可能写入的 NaN
+      logs[k]=Math.max(logs[k]||0,v);
+    });
+  });
+  Object.keys(agg).forEach(function(k){logs[k]=agg[k]});
+  // 某天最后一条记录被删除后该日已无会话明细，靠日级墓碑 log_<日期> 强制以明细为准，
+  // 否则另一端的旧聚合值会把已删掉的时长"复活"回来
+  Object.keys(DELETED).forEach(function(id){
+    if(id.indexOf("log_")!==0)return;
+    var k=id.slice(4);
+    if(agg[k])logs[k]=agg[k];else delete logs[k];
+  });
+  result.studyLogs=logs;
   result.subjects={};
   SUBJECTS.forEach(function(s){
     var ls=local.subjects&&local.subjects[s]||{progress:0,weak:[]};
@@ -1112,7 +1156,7 @@ function exportBackup(){
   var blob=new Blob([JSON.stringify(payload)],{type:"application/json"});
   var a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
-  a.download="初二学习台_备份_"+new Date().toISOString().slice(0,10)+".json";
+  a.download="初二学习台_备份_"+fmt(new Date())+".json";
   document.body.appendChild(a);a.click();
   setTimeout(function(){URL.revokeObjectURL(a.href);if(a.parentNode)a.parentNode.removeChild(a)},1000);
   try{localStorage.setItem(BK_KEY,String(Date.now()))}catch(e){}
@@ -1250,6 +1294,26 @@ function nav(page){
 function toggleMode(){
   if(state.parent.authed){state.parent.authed=false;saveState();nav("tasks");renderTop();toast("已切换学生模式");return}
   nav("parent");
+}
+
+/* 日期滚动校正。PWA 加到桌面后常常长期不关（一挂好几天），
+   curDate 若只在加载时算一次，跨天后所有「今天」的判断会停在旧日期 ——
+   半夜之后记的时长、打的卡、赚的分都会落到昨天。
+   这里在切回前台时、以及每分钟各校正一次。 */
+function syncCurDate(){
+  var d=fmt(new Date());
+  if(d===curDate)return false;
+  if(VIEW_DATE===curDate)VIEW_DATE=d;   // 用户没在回看历史时，浏览日期跟着顺延到今天
+  curDate=d;
+  return true;
+}
+function onDateRollover(){
+  if(!state)return;                     // 数据还没加载完，跳过
+  if(!syncCurDate())return;
+  renderTop();
+  var act=document.querySelector(".nav-item.active");
+  var pg=act&&act.getAttribute("data-page");
+  if(pg)nav(pg);                        // 重渲染当前页，日期标签/统计立刻对齐
 }
 
 function renderTop(){
@@ -1396,7 +1460,7 @@ function addPoints(delta,reason,ref){
   state.pointsLog.unshift(entry);
   if(state.pointsLog.length>300)state.pointsLog=state.pointsLog.slice(0,300);
   state.updatedAt=Date.now();saveState();
-  var todayLog=state.pointsLog.filter(function(l){return new Date(l.time).toISOString().slice(0,10)===curDate&&l.delta>0});
+  var todayLog=state.pointsLog.filter(function(l){return fmt(new Date(l.time))===curDate&&l.delta>0});
   var todayGain=todayLog.reduce(function(s,l){return s+l.delta},0);
   if(state.parent.freezeThreshold&&todayGain>state.parent.freezeThreshold){state._freezeFlag=true}
   checkBadges();
@@ -1580,14 +1644,22 @@ function timerElapsed(){
 function timerStart(){
   var t=state.timer;
   if(t&&t.running)return;
+  var subj=document.getElementById("tmSubject").value;
+  var savedMsg="";
+  // 暂停期间换了科目：先把已累计的时间按**原科目**落库，再从零开始。
+  // 否则之前那 40 分钟数学会被整段算到英语头上（科目分布图直接错）
+  if(t&&(t.accum||0)>0&&t.subject!==subj){
+    var kept=Math.round(t.accum/60000);
+    if(kept>=1){addStudySession(t.subject,kept,t.date||curDate,"计时专注(切换科目)","timer");savedMsg="，"+t.subject+" 的 "+kept+" 分钟已先存下"}
+    t=null;
+  }
   if(!t){
-    state.timer={running:true,subject:document.getElementById("tmSubject").value,startAt:Date.now(),accum:0,date:curDate};
+    state.timer={running:true,subject:subj,startAt:Date.now(),accum:0,date:curDate};
   }else{
     t.running=true;t.startAt=Date.now();
-    t.subject=document.getElementById("tmSubject").value;
   }
   state.updatedAt=Date.now();saveState();
-  startTimerTick();syncTimerButtons();toast("已开始计时："+state.timer.subject);
+  startTimerTick();renderStudy();toast("已开始计时："+state.timer.subject+savedMsg);
 }
 function timerPause(){
   var t=state.timer;if(!t||!t.running)return;
@@ -1598,16 +1670,23 @@ function timerPause(){
 function timerStop(){
   var t=state.timer;if(!t)return;
   var ms=timerElapsed();
-  var minutes=Math.round(ms/60000);
-  if(minutes<1){
-    if(ms<1000){state.timer=null;state.updatedAt=Date.now();saveState();stopTimerTick();syncTimerButtons();return}
-    minutes=1;
+  // 不足 1 分钟不落库。此前 2 秒也会被记成 1 分钟，
+  // 反复「开始 → 等 2 秒 → 结束」就能无限刷学习时长
+  if(ms<60000){
+    state.timer=null;
+    state.updatedAt=Date.now();saveState();
+    stopTimerTick();renderStudy();
+    toast("不足 1 分钟，本次不计入");
+    return;
   }
+  var minutes=Math.round(ms/60000);
+  var capped=false;
+  if(minutes>600){minutes=600;capped=true}   // 忘了点结束的极端情况，别让时长数字失控
   addStudySession(t.subject,minutes,t.date||curDate,"计时专注","timer");
   state.timer=null;
   state.updatedAt=Date.now();saveState();
-  stopTimerTick();syncTimerButtons();
-  toast("已保存 "+minutes+" 分钟"+(minutes>=25?"，积分 +"+Math.floor(minutes/25)*5:""));
+  stopTimerTick();renderStudy();
+  toast("已保存 "+minutes+" 分钟"+(sessionPoints(minutes)>0?"，积分 +"+sessionPoints(minutes):"")+(capped?"（时长异常，已按 600 分钟封顶）":""));
 }
 function startTimerTick(){
   stopTimerTick();
@@ -1647,15 +1726,29 @@ function syncTimerButtons(){
     document.getElementById("tmSubject").disabled=false;
   }
 }
+// 学习时长的积分规则集中在一处：每满 25 分钟 5 分。
+// 发放（addStudySession）与追回（delSession）必须用同一个函数，否则删记录时对不上账
+function sessionPoints(mins){
+  var m=Number(mins);
+  if(!isFinite(m)||m<=0)return 0;
+  return Math.floor(m/25)*5;
+}
 function addStudySession(subject,minutes,date,note,mode){
-  var mins=Math.max(1,Math.round(minutes));
+  var mins=Math.round(Number(minutes));
+  // 非法时长必须挡在数据层：原来 Math.max(1,NaN) 得到 NaN，会把 studyLogs 污染成 NaN，
+  // 之后今日/本周/日均/趋势图全部显示 NaN
+  if(!isFinite(mins)||mins<1)return null;
+  if(mins>600)mins=600;                       // 与手动补录上限保持一致
+  if(!date)date=curDate;
   var sess={id:uid("ss_"),subject:subject,minutes:mins,date:date,note:note||"",mode:mode||"manual",createdAt:Date.now()};
   state.studySessions.unshift(sess);
   if(state.studySessions.length>500)state.studySessions=state.studySessions.slice(0,500);
-  state.studyLogs[date]=(state.studyLogs[date]||0)+mins;
-  var gain=Math.floor(mins/25)*5;
+  var prev=Number(state.studyLogs[date]);
+  state.studyLogs[date]=(isFinite(prev)&&prev>0?prev:0)+mins;   // 顺带修掉历史 NaN
+  var gain=sessionPoints(mins);
   if(gain>0)addPoints(gain,"学习时长:"+subject+" "+mins+"分钟");
   state.updatedAt=Date.now();saveState();
+  return sess;
 }
 function addManualSession(){
   var s=document.getElementById("mnSubject").value;
@@ -1674,9 +1767,19 @@ function delSession(id){
   if(!s)return;
   markDeleted(id);
   state.studySessions=state.studySessions.filter(function(x){return x.id!==id});
-  state.studyLogs[s.date]=Math.max(0,(state.studyLogs[s.date]||0)-s.minutes);
-  if(!state.studyLogs[s.date])delete state.studyLogs[s.date];
-  state.updatedAt=Date.now();saveState();renderStudy();toast("已删除该记录");
+  // 当日时长按「剩余会话重算」而不是单纯相减，避免多次增删后累加值漂移
+  var rest=state.studySessions.filter(function(x){return x&&x.date===s.date})
+    .reduce(function(a,x){return a+(Number(x.minutes)||0)},0);
+  if(rest>0){state.studyLogs[s.date]=rest}
+  else{delete state.studyLogs[s.date];markDeleted("log_"+s.date)}   // 日级墓碑，防另一端的旧值复活
+  // 这条记录当初发的积分要一并追回，否则「补录 50 分钟 → 删除 → 再补录」可以无限刷分
+  var gain=sessionPoints(s.minutes);
+  if(gain>0){
+    var undo=Math.min(gain,Math.max(0,Number(state.points)||0));   // 余额不为负
+    if(undo>0)addPoints(-undo,"撤销时长:"+s.subject+" "+s.minutes+"分钟");
+  }
+  state.updatedAt=Date.now();saveState();renderStudy();
+  toast(gain>0?"已删除该记录，收回 "+gain+" 积分":"已删除该记录");
 }
 function sumRange(days){
   var now=new Date();var total=0;
@@ -1722,7 +1825,7 @@ function renderTrendChart(){
   document.getElementById("trendChart").innerHTML='<svg viewBox="0 0 '+W+' '+H+'" width="100%" style="max-width:100%;display:block">'+grid+area+line+dots+vals+labels+'</svg>';
 }
 function renderSubjTimeChart(){
-  var now=new Date();var from=new Date(now-29*864e5).toISOString().slice(0,10);
+  var now=new Date();var from=fmt(new Date(now-29*864e5));
   var data=SUBJECTS.concat(["其他"]).map(function(s){
     var m=state.studySessions.filter(function(x){return x.subject===s&&x.date>=from}).reduce(function(a,b){return a+b.minutes},0);
     return {s:s,m:m};
@@ -1762,19 +1865,19 @@ function histPad(n){return (n<10?"0":"")+n}
 function histDs(y,m,d){return y+"-"+histPad(m+1)+"-"+histPad(d)}
 function histInit(){
   if(HIST_Y!==null)return;
-  var t=new Date();HIST_Y=t.getUTCFullYear();HIST_M=t.getUTCMonth();HIST_SEL=curDate;
+  var t=new Date();HIST_Y=t.getFullYear();HIST_M=t.getMonth();HIST_SEL=curDate;
 }
 function histShift(n){
   histInit();HIST_M+=n;
   if(HIST_M<0){HIST_M=11;HIST_Y--}else if(HIST_M>11){HIST_M=0;HIST_Y++}
   renderHistory();
 }
-function histToday(){var t=new Date();HIST_Y=t.getUTCFullYear();HIST_M=t.getUTCMonth();HIST_SEL=curDate;renderHistory()}
+function histToday(){var t=new Date();HIST_Y=t.getFullYear();HIST_M=t.getMonth();HIST_SEL=curDate;renderHistory()}
 function histSelect(ds){HIST_SEL=ds;renderHistory()}
 function histDayPoints(ds){
   var n=0;
   (state.pointsLog||[]).forEach(function(l){
-    if(l.delta>0&&l.time){try{if(new Date(l.time).toISOString().slice(0,10)===ds)n+=l.delta}catch(e){}}
+    if(l.delta>0&&l.time){try{if(fmt(new Date(l.time))===ds)n+=l.delta}catch(e){}}
   });
   return n;
 }
@@ -1904,7 +2007,7 @@ function dayDiff(dateStr){
   var d=new Date(dateStr+"T00:00:00Z").getTime();
   return Math.round((d-t)/86400000);
 }
-function addDays(n){return new Date(Date.now()+n*864e5).toISOString().slice(0,10)}
+function addDays(n){return fmt(new Date(Date.now()+n*864e5))}
 function phaseStat(ph){
   var items=ph.items||[];
   var done=items.filter(function(x){return x.done}).length;
@@ -2367,7 +2470,7 @@ function auditPoints(){
   var el=document.getElementById("ptsAudit");
   if(!el)return;
   var d=ptsAuditData();
-  function fmt(list){return list.length?list.map(function(x){return x.k+" "+x.v}).join("、"):"—"}
+  function fmtList(list){return list.length?list.map(function(x){return x.k+" "+x.v}).join("、"):"—"}
   var h="流水 "+d.raw+" 条";
   if(d.raw>d.dedup)h+='（去重后 '+d.dedup+' 条，历史重复 '+(d.raw-d.dedup)+' 条）';
   h+="<br>收入合计 <b>"+d.income+"</b> 分 − 支出合计 <b>"+d.outgo+"</b> 分 = 流水净额 <b>"+d.net+"</b> 分";
@@ -2377,8 +2480,8 @@ function auditPoints(){
   if(d.derived>d.current)h+='<br><b style="color:var(--amber)">少了 '+(d.derived-d.current)+' 分，可点下方「按流水补回积分」</b>';
   else if(d.derived<d.current)h+='<br><span style="color:var(--text-3)">流水已被 300 条上限截断，余额以当前值为准（只补不扣）</span>';
   else h+='<br><b style="color:var(--green)">账目一致</b>';
-  h+='<br><span style="color:var(--text-3)">收入构成：'+fmt(d.incomeList)+'</span>';
-  h+='<br><span style="color:var(--text-3)">支出构成：'+fmt(d.outgoList)+'</span>';
+  h+='<br><span style="color:var(--text-3)">收入构成：'+fmtList(d.incomeList)+'</span>';
+  h+='<br><span style="color:var(--text-3)">支出构成：'+fmtList(d.outgoList)+'</span>';
   if(d.pendCount>0||d.rejCount>0){
     var s="兑换单 "+d.pendCount+" 笔共 "+d.applied+" 分（计入支出）";
     if(d.rejCount>0)s+="；已驳回 "+d.rejCount+" 笔共 "+d.rejCost+" 分（积分已退还，故不计入消耗）";
@@ -2407,6 +2510,10 @@ purgeStaleApiCache().then(function(){return loadState()}).then(function(){
   var plDateEl=document.getElementById("plDate");
   if(plDateEl&&!plDateEl.value)plDateEl.value=addDays(48);
   if(state.timer&&state.timer.running)startTimerTick();
+  // 跨天校正：切回前台立刻校正一次，之后每分钟一次（PWA 长期挂着也不会停在上一天的日期）
+  document.addEventListener("visibilitychange",function(){if(!document.hidden)onDateRollover()});
+  window.addEventListener("focus",onDateRollover);
+  setInterval(onDateRollover,60000);
 });
 
 // Register Service Worker for PWA
